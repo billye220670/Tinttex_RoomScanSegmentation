@@ -20,7 +20,16 @@
         <!-- Right: Control Panel -->
         <div class="control-panel">
             <!-- Camera Preview Viewport -->
-            <div id="camera-preview-container"></div>
+            <div id="camera-preview-container">
+                <img id="preview-background" src="/Raw.png" alt="Background">
+            </div>
+
+            <div class="preview-controls">
+                <label for="fov-slider">
+                    FOV: <span id="fov-value">60</span>°
+                </label>
+                <input type="range" id="fov-slider" min="30" max="120" step="1" value="60">
+            </div>
 
             <h1>Plane Extraction</h1>
 

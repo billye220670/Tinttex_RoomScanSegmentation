@@ -9,6 +9,8 @@ export function initUI(callbacks) {
     const clusterValue = document.getElementById('cluster-value');
     const minClusterSlider = document.getElementById('min-cluster-size');
     const minClusterValue = document.getElementById('min-cluster-value');
+    const fovSlider = document.getElementById('fov-slider');
+    const fovValue = document.getElementById('fov-value');
     const runButton = document.getElementById('run-extraction');
     const downloadButton = document.getElementById('download-lowpoly');
     const step1Button = document.getElementById('step1-btn');
@@ -35,6 +37,14 @@ export function initUI(callbacks) {
 
     minClusterSlider.addEventListener('input', (e) => {
         minClusterValue.textContent = e.target.value;
+    });
+
+    fovSlider.addEventListener('input', (e) => {
+        const fov = parseInt(e.target.value);
+        fovValue.textContent = fov;
+        if (callbacks.onFOVChange) {
+            callbacks.onFOVChange(fov);
+        }
     });
 
     // Get current parameters

@@ -48,6 +48,15 @@ async def get_test_scene():
     return FileResponse(GLB_FILE)
 
 
+@app.get("/Raw.png")
+async def get_raw_image():
+    """Serve the background reference image"""
+    img_file = FRONTEND_DIR / "Raw.png"
+    if not img_file.exists():
+        raise HTTPException(status_code=404, detail="Raw.png not found")
+    return FileResponse(img_file)
+
+
 @app.post("/api/extract")
 async def extract_planes(request: ExtractionRequest):
     """

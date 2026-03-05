@@ -8,8 +8,7 @@ let lowPolyGroup = null;
 let currentLowPolyData = null;
 
 // Camera preview viewport
-let previewScene, previewCamera, previewRenderer;
-let cameraModel = null;
+let fixedCamera, previewRenderer;
 
 export function initScene() {
     const container = document.getElementById('canvas-container');
@@ -68,6 +67,13 @@ function onWindowResize() {
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
+}
+
+export function updateCameraFOV(fov) {
+    if (fixedCamera) {
+        fixedCamera.fov = fov;
+        fixedCamera.updateProjectionMatrix();
+    }
 }
 
 export function loadOriginalModel() {
@@ -172,90 +178,60 @@ export function getCurrentLowPolyData() {
 export function initCameraPreview() {
     const container = document.getElementById('camera-preview-container');
 
-    // Preview Scene
-    previewScene = new THREE.Scene();
-    previewScene.background = new THREE.Color(0x1a1a1a);
+    // Image aspect ratio: 3414 / 2560 = 1.333
+    const imageAspect = 3414 / 2560;
 
-    // Preview Camera - fixed position looking at origin
-    previewCamera = new THREE.PerspectiveCamera(
-        50,
-        container.clientWidth / container.clientHeight,
-        0.01,
-        10
+    // Create fixed camera at origin (0,0,0) with zero rotation
+    fixedCamera = new THREE.PerspectiveCamera(
+        60,
+        imageAspect,
+        0.1,
+        1000
     );
-    previewCamera.position.set(0.5, 0.3, 0.5);
-    previewCamera.lookAt(0, 0, 0);
+    fixedCamera.position.set(0, 0, 0);
+    fixedCamera.rotation.set(0, 0, 0);
 
-    // Preview Renderer
-    previewRenderer = new THREE.WebGLRenderer({ antialias: true });
-    previewRenderer.setSize(container.clientWidth, container.clientHeight);
+    // Add fixed camera to main scene
+    scene.add(fixedCamera);
+
+    // Preview Renderer with transparent background
+    previewRenderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true
+    });
+    previewRenderer.setClearColor(0x000000, 0);
+    previewRenderer.setSize(container.clientWidth, container.clientHeight, false);
     previewRenderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(previewRenderer.domElement);
 
-    // Lights for preview
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    previewScene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
-    directionalLight.position.set(1, 1, 1);
-    previewScene.add(directionalLight);
-
-    // Add coordinate axes helper
-    const axesHelper = new THREE.AxesHelper(0.2);
-    previewScene.add(axesHelper);
-
-    // Load camera mesh
-    loadCameraModel();
+    // Handle window resize for preview
+    window.addEventListener('resize', onPreviewResize);
 
     // Animation loop for preview
     animatePreview();
 }
 
-function loadCameraModel() {
-    const loader = new GLTFLoader();
-
-    loader.load(
-        '/TestScene.glb',
-        (gltf) => {
-            // Find camera mesh in the scene
-            gltf.scene.traverse((child) => {
-                if (child.isMesh && child.name.toLowerCase().includes('camera')) {
-                    if (cameraModel) {
-                        previewScene.remove(cameraModel);
-                    }
-                    cameraModel = child.clone();
-
-                    // Make camera mesh visible with a distinct color
-                    cameraModel.material = new THREE.MeshStandardMaterial({
-                        color: 0x4CAF50,
-                        metalness: 0.3,
-                        roughness: 0.7
-                    });
-
-                    // Position at origin (zero transform)
-                    cameraModel.position.set(0, 0, 0);
-                    cameraModel.rotation.set(0, 0, 0);
-                    cameraModel.scale.set(1, 1, 1);
-
-                    previewScene.add(cameraModel);
-                }
-            });
-        },
-        undefined,
-        (error) => {
-            console.error('Failed to load camera model:', error);
-        }
-    );
+function onPreviewResize() {
+    const container = document.getElementById('camera-preview-container');
+    if (fixedCamera && previewRenderer) {
+        // Keep the fixed aspect ratio matching the background image
+        const imageAspect = 3414 / 2560;
+        fixedCamera.aspect = imageAspect;
+        fixedCamera.updateProjectionMatrix();
+        previewRenderer.setSize(container.clientWidth, container.clientHeight, false);
+    }
 }
 
 function animatePreview() {
     requestAnimationFrame(animatePreview);
 
-    // Slowly rotate the preview camera around the origin
-    const time = Date.now() * 0.0003;
-    previewCamera.position.x = Math.cos(time) * 0.5;
-    previewCamera.position.z = Math.sin(time) * 0.5;
-    previewCamera.lookAt(0, 0, 0);
+    // Temporarily remove scene background for transparent rendering
+    const originalBackground = scene.background;
+    scene.background = null;
 
-    previewRenderer.render(previewScene, previewCamera);
+    // Render main scene from fixed camera's perspective
+    previewRenderer.render(scene, fixedCamera);
+
+    // Restore original background
+    scene.background = originalBackground;
 }

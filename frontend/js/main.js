@@ -1,4 +1,4 @@
-import { initScene, loadOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview } from './scene.js';
+import { initScene, loadOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV } from './scene.js';
 import { initUI, showLoading, hideLoading, setButtonEnabled, showDownloadButton, updateStats, showError } from './ui.js';
 
 // Initialize application
@@ -27,7 +27,8 @@ async function init() {
         onStep1: runStep1,
         onStep2: runStep2,
         onStep3: runStep3,
-        onStep4: runStep4
+        onStep4: runStep4,
+        onFOVChange: updateCameraFOV
     });
 }
 
