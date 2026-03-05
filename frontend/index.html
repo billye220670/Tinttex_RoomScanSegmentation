@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Scene Plane Extraction</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Left: 3D Viewport -->
+        <div class="viewport">
+            <div id="canvas-container"></div>
+            <div id="loading-overlay" class="hidden">
+                <div class="spinner"></div>
+                <p id="loading-text">Processing...</p>
+            </div>
+        </div>
+
+        <!-- Right: Control Panel -->
+        <div class="control-panel">
+            <!-- Camera Preview Viewport -->
+            <div id="camera-preview-container"></div>
+
+            <h1>Plane Extraction</h1>
+
+            <div class="control-group">
+                <label for="voxel-size">
+                    Voxel Size: <span id="voxel-value">0.05</span>
+                </label>
+                <input type="range" id="voxel-size" min="0.01" max="0.2" step="0.01" value="0.05">
+                <small>Controls point cloud density</small>
+            </div>
+
+            <div class="control-group">
+                <label for="distance-threshold">
+                    Distance Threshold: <span id="distance-value">0.05</span>
+                </label>
+                <input type="range" id="distance-threshold" min="0.01" max="0.2" step="0.01" value="0.05">
+                <small>RANSAC plane fitting tolerance</small>
+            </div>
+
+            <div class="control-group">
+                <label for="angle-tolerance">
+                    Angle Tolerance: <span id="angle-value">5.0</span>°
+                </label>
+                <input type="range" id="angle-tolerance" min="1.0" max="15.0" step="0.5" value="5.0">
+                <small>Semantic classification threshold</small>
+            </div>
+
+            <div class="control-group">
+                <label for="cluster-radius">
+                    Cluster Radius: <span id="cluster-value">0.10</span>
+                </label>
+                <input type="range" id="cluster-radius" min="0.05" max="0.30" step="0.01" value="0.10">
+                <small>Connectivity detection radius</small>
+            </div>
+
+            <div class="control-group">
+                <label for="min-cluster-size">
+                    Min Cluster Size: <span id="min-cluster-value">500</span>
+                </label>
+                <input type="range" id="min-cluster-size" min="100" max="2000" step="100" value="500">
+                <small>Minimum points in wall cluster</small>
+            </div>
+
+            <button id="run-extraction" class="btn-primary">Run Full Extraction</button>
+
+            <div class="step-controls">
+                <h3>Step-by-Step Mode</h3>
+                <button id="step1-btn" class="btn-step">Step 1: Preprocess</button>
+                <button id="step2-btn" class="btn-step">Step 2: Extract Planes</button>
+                <button id="step3-btn" class="btn-step">Step 3: Classify</button>
+                <button id="step4-btn" class="btn-step">Step 4: Generate Mesh</button>
+            </div>
+
+            <button id="download-lowpoly" class="btn-secondary hidden">Download Low-Poly</button>
+
+            <div id="stats" class="stats hidden">
+                <h3>Results</h3>
+                <p>Floor: <span id="floor-count">0</span></p>
+                <p>Ceiling: <span id="ceiling-count">0</span></p>
+                <p>Walls: <span id="wall-count">0</span></p>
+                <p>Total Planes: <span id="total-planes">0</span></p>
+            </div>
+
+            <div class="legend">
+                <h3>Color Legend</h3>
+                <div class="legend-item">
+                    <span class="color-box" style="background: #4CAF50;"></span>
+                    <span>Floor</span>
+                </div>
+                <div class="legend-item">
+                    <span class="color-box" style="background: #F44336;"></span>
+                    <span>Ceiling</span>
+                </div>
+                <div class="legend-item">
+                    <span class="color-box" style="background: #2196F3;"></span>
+                    <span>Wall</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="/js/main.js"></script>
+</body>
+</html>
