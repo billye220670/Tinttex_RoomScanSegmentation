@@ -32,8 +32,7 @@ class ExtractionRequest(BaseModel):
     angle_tolerance: float = 5.0
     cluster_radius: float = 0.1
     min_cluster_size: int = 500
-    expand_margin: float = 0.3
-    enable_trimming: bool = False
+    expand_margin: float = 1.5
 
 
 @app.get("/")
@@ -119,7 +118,7 @@ async def extract_planes(request: ExtractionRequest):
                     floor_plane=floor_plane,
                     ceiling_plane=ceiling_plane,
                     wall_planes=wall_planes,
-                    enable_trimming=request.enable_trimming
+                    enable_trimming=True
                 )
                 if mesh is not None:
                     meshes_by_label[label].append(mesh)

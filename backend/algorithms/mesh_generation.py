@@ -53,7 +53,7 @@ def generate_low_poly_mesh(
     plane_model: np.ndarray,
     points: np.ndarray,
     alpha: float = 1.0,
-    expand_margin: float = 0.3,
+    expand_margin: float = 1.5,
     semantic_label: Optional[str] = None,
     floor_plane: Optional[np.ndarray] = None,
     ceiling_plane: Optional[np.ndarray] = None,
@@ -61,10 +61,13 @@ def generate_low_poly_mesh(
     enable_trimming: bool = False
 ) -> trimesh.Trimesh:
     """
-    Generate low-poly mesh from plane points with Phase 2 intelligent trimming.
+    Generate low-poly mesh from plane points.
 
-    Phase 1: Expand to rectangle
-    Phase 2: Clip by neighbor planes (walls, floor, ceiling)
+    All surfaces: extend towards camera (at origin) for initial bounding box.
+    Phase 2 trimming (when enable_trimming=True):
+      - wall: clipped by floor, ceiling, and other walls
+      - floor: clipped by walls
+      - ceiling: clipped by walls
     """
     if len(points) < 3:
         return None
@@ -73,39 +76,42 @@ def generate_low_poly_mesh(
 
     normal = plane_model[:3] / np.linalg.norm(plane_model[:3])
     points_2d, basis_u, basis_v = project_to_2d(points, normal)
+    centroid_3d = np.mean(points, axis=0)
+    d = plane_model[3]
+    projected_centroid = centroid_3d - (np.dot(normal, centroid_3d) + d) * normal
 
-    # Phase 1: Expanded bounding box
+    # Bounding box of actual point cloud in 2D plane space
     min_u, max_u = np.min(points_2d[:, 0]), np.max(points_2d[:, 0])
     min_v, max_v = np.min(points_2d[:, 1]), np.max(points_2d[:, 1])
 
-    min_u -= expand_margin
-    max_u += expand_margin
-    min_v -= expand_margin
-    max_v += expand_margin
+    # Camera extension: project camera (0,0,0) onto the plane and include in bbox
+    cam_dist = d  # np.dot(normal, [0,0,0]) + d == d
+    cam_proj_3d = -cam_dist * normal
+    cam_centered = cam_proj_3d - centroid_3d
+    cam_u = np.dot(cam_centered, basis_u)
+    cam_v = np.dot(cam_centered, basis_v)
+
+    min_u = min(min_u, cam_u) - expand_margin
+    max_u = max(max_u, cam_u) + expand_margin
+    min_v = min(min_v, cam_v) - expand_margin
+    max_v = max(max_v, cam_v) + expand_margin
 
     polygon = box(min_u, min_v, max_u, max_v)
 
     # Phase 2: Clip by neighbor planes
     if enable_trimming:
-        centroid_3d = np.mean(points, axis=0)
-        d = plane_model[3]
-        projected_centroid = centroid_3d - (np.dot(normal, centroid_3d) + d) * normal
-
         neighbor_planes = []
 
         if semantic_label == 'wall':
-            # Walls are clipped by floor, ceiling, and other walls
             if floor_plane is not None:
                 neighbor_planes.append(floor_plane)
             if ceiling_plane is not None:
                 neighbor_planes.append(ceiling_plane)
             if wall_planes:
-                for other_plane, _ in wall_planes:
-                    if not np.allclose(other_plane, plane_model):
-                        neighbor_planes.append(other_plane)
-
+                for wp, _ in wall_planes:
+                    if not np.allclose(wp, plane_model, atol=1e-5):
+                        neighbor_planes.append(wp)
         elif semantic_label in ['floor', 'ceiling']:
-            # Floor/ceiling are clipped by all walls
             if wall_planes:
                 neighbor_planes = [wp for wp, _ in wall_planes]
 
@@ -120,10 +126,9 @@ def generate_low_poly_mesh(
                 basis_v,
                 neighbor
             )
-
-        if polygon.is_empty or polygon.area < 0.01:
-            print(f"[Mesh Gen] Polygon too small after clipping, skipping")
-            return None
+            if polygon.is_empty or polygon.area < 0.01:
+                print(f"[Mesh Gen] {semantic_label} polygon too small after clipping, skipping")
+                return None
 
     # Convert polygon to mesh
     vertices_2d, faces = polygon_to_mesh_2d(polygon)
@@ -133,10 +138,6 @@ def generate_low_poly_mesh(
 
     # Back-project to 3D
     try:
-        centroid_3d = np.mean(points, axis=0)
-        d = plane_model[3]
-        projected_centroid = centroid_3d - (np.dot(normal, centroid_3d) + d) * normal
-
         basis_matrix = np.vstack([basis_u, basis_v]).T
         vertices_3d = projected_centroid + vertices_2d @ basis_matrix.T
 
@@ -157,7 +158,7 @@ def generate_low_poly_mesh(
 
 def export_to_glb(meshes_by_label: Dict[str, List[trimesh.Trimesh]]) -> bytes:
     """
-    Export classified meshes to GLB format with semantic colors.
+    Export classified meshes to GLB format with semantic colors and named nodes.
     """
     color_map = {
         'floor': [76, 175, 80, 255],
@@ -165,19 +166,21 @@ def export_to_glb(meshes_by_label: Dict[str, List[trimesh.Trimesh]]) -> bytes:
         'wall': [33, 150, 243, 255]
     }
 
-    combined_meshes = []
+    export_scene = trimesh.Scene()
+    has_geometry = False
 
     for label, meshes in meshes_by_label.items():
         color = color_map.get(label, [128, 128, 128, 255])
-        for mesh in meshes:
+        for i, mesh in enumerate(meshes):
             if mesh is not None and len(mesh.vertices) > 0:
                 mesh.visual.vertex_colors = color
-                combined_meshes.append(mesh)
+                node_name = f"{label}_{i}"
+                export_scene.add_geometry(mesh, node_name=node_name, geom_name=node_name)
+                has_geometry = True
 
-    if not combined_meshes:
+    if not has_geometry:
         return None
 
-    scene = trimesh.Scene(combined_meshes)
     output = io.BytesIO()
-    scene.export(output, file_type='glb')
+    export_scene.export(output, file_type='glb')
     return output.getvalue()

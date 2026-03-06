@@ -10,14 +10,28 @@ let currentLowPolyData = null;
 // Camera preview viewport
 let fixedCamera, previewRenderer;
 
+// Display mode state per label: 'solid' | 'checker' | 'grid'
+const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
+const checkerTextures = {};
+
+const CHECKER_COLORS = {
+    wall:    ['#90b8e8', '#d0e8ff'],
+    ceiling: ['#e89090', '#ffd0d0'],
+    floor:   ['#90c890', '#d0f0d0'],
+};
+
+const SEMANTIC_COLORS = {
+    floor: 0x4CAF50,
+    ceiling: 0xF44336,
+    wall: 0x2196F3
+};
+
 export function initScene() {
     const container = document.getElementById('canvas-container');
 
-    // Scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a0a);
 
-    // Camera
     camera = new THREE.PerspectiveCamera(
         60,
         container.clientWidth / container.clientHeight,
@@ -26,18 +40,15 @@ export function initScene() {
     );
     camera.position.set(5, 5, 5);
 
-    // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
 
-    // Controls
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    // Lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
@@ -45,14 +56,10 @@ export function initScene() {
     directionalLight.position.set(10, 10, 10);
     scene.add(directionalLight);
 
-    // Grid
     const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
     scene.add(gridHelper);
 
-    // Handle window resize
     window.addEventListener('resize', onWindowResize);
-
-    // Animation loop
     animate();
 }
 
@@ -74,6 +81,148 @@ export function updateCameraFOV(fov) {
         fixedCamera.fov = fov;
         fixedCamera.updateProjectionMatrix();
     }
+}
+
+export function setPreviewOpacity(opacity) {
+    // opacity: 0-100
+    if (previewRenderer) {
+        previewRenderer.domElement.style.opacity = (opacity / 100).toString();
+    }
+}
+
+export function setDisplayMode(label, mode) {
+    displayModes[label] = mode;
+    applyDisplayModes();
+}
+
+function createCheckerTexture(label) {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const tiles = 8;
+    const tileSize = size / tiles;
+    const [colorA, colorB] = CHECKER_COLORS[label] || ['#cccccc', '#888888'];
+    for (let y = 0; y < tiles; y++) {
+        for (let x = 0; x < tiles; x++) {
+            ctx.fillStyle = (x + y) % 2 === 0 ? colorA : colorB;
+            ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+        }
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+}
+
+function getLabelFromMesh(child) {
+    // Try by node/mesh name first
+    const name = child.name || '';
+    if (/^floor/i.test(name)) return 'floor';
+    if (/^ceiling/i.test(name)) return 'ceiling';
+    if (/^wall/i.test(name)) return 'wall';
+
+    // Fallback: detect by vertex color
+    const colors = child.geometry && child.geometry.attributes.color;
+    if (colors && colors.count > 0) {
+        const r = colors.getX(0), g = colors.getY(0), b = colors.getZ(0);
+        if (g > 0.6 && r < 0.5 && b < 0.5) return 'floor';
+        if (r > 0.7 && g < 0.4) return 'ceiling';
+        if (b > 0.7 && r < 0.3) return 'wall';
+    }
+    return null;
+}
+
+function generatePlanarUVs(geometry) {
+    geometry.computeVertexNormals();
+    const normals = geometry.attributes.normal;
+    const positions = geometry.attributes.position;
+
+    // Compute average normal
+    let nx = 0, ny = 0, nz = 0;
+    for (let i = 0; i < normals.count; i++) {
+        nx += normals.getX(i);
+        ny += normals.getY(i);
+        nz += normals.getZ(i);
+    }
+    const nlen = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (nlen > 0) { nx /= nlen; ny /= nlen; nz /= nlen; }
+
+    // Compute tangent (horizontal direction in the plane)
+    let tx, ty = 0, tz;
+    if (Math.abs(ny) > 0.9) {
+        // Horizontal surface
+        tx = 1; tz = 0;
+    } else {
+        const hlen = Math.sqrt(nx * nx + nz * nz);
+        tx = hlen > 0 ? -nz / hlen : 1;
+        tz = hlen > 0 ? nx / hlen : 0;
+    }
+
+    // Bitangent = N x T
+    const bx = ny * tz - nz * ty;
+    const by = nz * tx - nx * tz;
+    const bz = nx * ty - ny * tx;
+
+    // Centroid
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < positions.count; i++) {
+        cx += positions.getX(i);
+        cy += positions.getY(i);
+        cz += positions.getZ(i);
+    }
+    cx /= positions.count;
+    cy /= positions.count;
+    cz /= positions.count;
+
+    const scale = 0.5; // 2m per checker tile
+    const uvs = new Float32Array(positions.count * 2);
+    for (let i = 0; i < positions.count; i++) {
+        const dx = positions.getX(i) - cx;
+        const dy = positions.getY(i) - cy;
+        const dz = positions.getZ(i) - cz;
+        uvs[i * 2]     = (dx * tx + dy * ty + dz * tz) * scale;
+        uvs[i * 2 + 1] = (dx * bx + dy * by + dz * bz) * scale;
+    }
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+}
+
+function applyDisplayModes() {
+    if (!lowPolyGroup) return;
+
+    lowPolyGroup.traverse((child) => {
+        if (!child.isMesh) return;
+
+        const label = getLabelFromMesh(child);
+        if (!label) return;
+
+        const mode = displayModes[label];
+        const color = SEMANTIC_COLORS[label];
+
+        if (mode === 'solid') {
+            child.material = new THREE.MeshLambertMaterial({
+                color,
+                side: THREE.DoubleSide,
+                flatShading: true
+            });
+        } else if (mode === 'checker') {
+            if (!checkerTextures[label]) checkerTextures[label] = createCheckerTexture(label);
+            if (!child.geometry.attributes.uv) {
+                generatePlanarUVs(child.geometry);
+            }
+            child.material = new THREE.MeshBasicMaterial({
+                map: checkerTextures[label],
+                side: THREE.DoubleSide
+            });
+        } else if (mode === 'grid') {
+            child.material = new THREE.MeshBasicMaterial({
+                color,
+                wireframe: true,
+                side: THREE.DoubleSide
+            });
+        }
+    });
 }
 
 export function loadOriginalModel() {
@@ -125,10 +274,7 @@ export function loadOriginalModel() {
 
 export function addLowPolyOverlay(base64glb) {
     return new Promise((resolve, reject) => {
-        // Clear previous low-poly
         clearLowPoly();
-
-        // Store for download
         currentLowPolyData = base64glb;
 
         // Decode base64 to ArrayBuffer
@@ -138,23 +284,15 @@ export function addLowPolyOverlay(base64glb) {
             bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Load GLB
         const loader = new GLTFLoader();
         loader.parse(
             bytes.buffer,
             '',
             (gltf) => {
                 lowPolyGroup = gltf.scene;
-
-                // Ensure materials are visible
-                lowPolyGroup.traverse((child) => {
-                    if (child.isMesh) {
-                        child.material.side = THREE.DoubleSide;
-                        child.material.flatShading = true;
-                    }
-                });
-
                 scene.add(lowPolyGroup);
+                // Apply current display modes to newly loaded meshes
+                applyDisplayModes();
                 resolve();
             },
             (error) => {
@@ -178,7 +316,7 @@ export function getCurrentLowPolyData() {
 export function initCameraPreview() {
     const container = document.getElementById('camera-preview-container');
 
-    // Image aspect ratio: 3414 / 2560 = 1.333
+    // Image aspect ratio: 3414 / 2560
     const imageAspect = 3414 / 2560;
 
     // Create fixed camera at origin (0,0,0) with zero rotation
@@ -191,7 +329,6 @@ export function initCameraPreview() {
     fixedCamera.position.set(0, 0, 0);
     fixedCamera.rotation.set(0, 0, 0);
 
-    // Add fixed camera to main scene
     scene.add(fixedCamera);
 
     // Preview Renderer with transparent background
@@ -204,17 +341,13 @@ export function initCameraPreview() {
     previewRenderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(previewRenderer.domElement);
 
-    // Handle window resize for preview
     window.addEventListener('resize', onPreviewResize);
-
-    // Animation loop for preview
     animatePreview();
 }
 
 function onPreviewResize() {
     const container = document.getElementById('camera-preview-container');
     if (fixedCamera && previewRenderer) {
-        // Keep the fixed aspect ratio matching the background image
         const imageAspect = 3414 / 2560;
         fixedCamera.aspect = imageAspect;
         fixedCamera.updateProjectionMatrix();
@@ -229,7 +362,6 @@ function animatePreview() {
     const originalBackground = scene.background;
     scene.background = null;
 
-    // Render main scene from fixed camera's perspective
     previewRenderer.render(scene, fixedCamera);
 
     // Restore original background

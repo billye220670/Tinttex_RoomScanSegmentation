@@ -11,9 +11,10 @@ export function initUI(callbacks) {
     const minClusterValue = document.getElementById('min-cluster-value');
     const expandMarginSlider = document.getElementById('expand-margin');
     const expandMarginValue = document.getElementById('expand-margin-value');
-    const enableTrimmingCheckbox = document.getElementById('enable-trimming');
     const fovSlider = document.getElementById('fov-slider');
     const fovValue = document.getElementById('fov-value');
+    const overlayOpacitySlider = document.getElementById('overlay-opacity');
+    const overlayOpacityValue = document.getElementById('overlay-opacity-value');
     const runButton = document.getElementById('run-extraction');
     const downloadButton = document.getElementById('download-lowpoly');
     const step1Button = document.getElementById('step1-btn');
@@ -21,8 +22,11 @@ export function initUI(callbacks) {
     const step3Button = document.getElementById('step3-btn');
     const step4Button = document.getElementById('step4-btn');
     const step5Button = document.getElementById('step5-btn');
+    const wallDisplaySelect = document.getElementById('wall-display-mode');
+    const ceilingDisplaySelect = document.getElementById('ceiling-display-mode');
+    const floorDisplaySelect = document.getElementById('floor-display-mode');
 
-    // Update slider values
+    // Slider value updates
     voxelSlider.addEventListener('input', (e) => {
         voxelValue.textContent = e.target.value;
     });
@@ -50,9 +54,26 @@ export function initUI(callbacks) {
     fovSlider.addEventListener('input', (e) => {
         const fov = parseInt(e.target.value);
         fovValue.textContent = fov;
-        if (callbacks.onFOVChange) {
-            callbacks.onFOVChange(fov);
-        }
+        if (callbacks.onFOVChange) callbacks.onFOVChange(fov);
+    });
+
+    overlayOpacitySlider.addEventListener('input', (e) => {
+        const opacity = parseInt(e.target.value);
+        overlayOpacityValue.textContent = opacity;
+        if (callbacks.onPreviewOpacityChange) callbacks.onPreviewOpacityChange(opacity);
+    });
+
+    // Display mode selects
+    wallDisplaySelect.addEventListener('change', (e) => {
+        if (callbacks.onDisplayModeChange) callbacks.onDisplayModeChange('wall', e.target.value);
+    });
+
+    ceilingDisplaySelect.addEventListener('change', (e) => {
+        if (callbacks.onDisplayModeChange) callbacks.onDisplayModeChange('ceiling', e.target.value);
+    });
+
+    floorDisplaySelect.addEventListener('change', (e) => {
+        if (callbacks.onDisplayModeChange) callbacks.onDisplayModeChange('floor', e.target.value);
     });
 
     // Get current parameters
@@ -63,39 +84,17 @@ export function initUI(callbacks) {
         cluster_radius: parseFloat(clusterSlider.value),
         min_cluster_size: parseInt(minClusterSlider.value),
         expand_margin: parseFloat(expandMarginSlider.value),
-        enable_trimming: enableTrimmingCheckbox.checked
+        enable_trimming: true
     });
 
-    // Run extraction
-    runButton.addEventListener('click', () => {
-        callbacks.onRunExtraction(getParams());
-    });
-
-    // Step buttons
-    step1Button.addEventListener('click', () => {
-        callbacks.onStep1(getParams());
-    });
-
-    step2Button.addEventListener('click', () => {
-        callbacks.onStep2(getParams());
-    });
-
-    step3Button.addEventListener('click', () => {
-        callbacks.onStep3(getParams());
-    });
-
-    step4Button.addEventListener('click', () => {
-        callbacks.onStep4(getParams());
-    });
-
-    step5Button.addEventListener('click', () => {
-        callbacks.onStep5(getParams());
-    });
-
-    // Download low-poly
-    downloadButton.addEventListener('click', () => {
-        callbacks.onDownload();
-    });
+    // Button handlers
+    runButton.addEventListener('click', () => callbacks.onRunExtraction(getParams()));
+    step1Button.addEventListener('click', () => callbacks.onStep1(getParams()));
+    step2Button.addEventListener('click', () => callbacks.onStep2(getParams()));
+    step3Button.addEventListener('click', () => callbacks.onStep3(getParams()));
+    step4Button.addEventListener('click', () => callbacks.onStep4(getParams()));
+    step5Button.addEventListener('click', () => callbacks.onStep5(getParams()));
+    downloadButton.addEventListener('click', () => callbacks.onDownload());
 }
 
 export function showLoading(message = 'Processing...') {
@@ -123,6 +122,7 @@ export function setButtonEnabled(enabled) {
     step2Button.disabled = !enabled;
     step3Button.disabled = !enabled;
     step4Button.disabled = !enabled;
+    step5Button.disabled = !enabled;
 }
 
 export function showDownloadButton() {
@@ -133,7 +133,6 @@ export function showDownloadButton() {
 export function updateStats(stats) {
     const statsDiv = document.getElementById('stats');
 
-    // Handle different stat formats
     if (stats.point_count !== undefined) {
         document.getElementById('floor-count').textContent = '-';
         document.getElementById('ceiling-count').textContent = '-';
