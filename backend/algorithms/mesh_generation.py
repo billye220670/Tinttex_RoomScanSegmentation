@@ -98,24 +98,20 @@ def generate_low_poly_mesh(
 
     polygon = box(min_u, min_v, max_u, max_v)
 
-    # Phase 2: Clip by neighbor planes
-    if enable_trimming:
+    # Phase 2: Clip walls by floor, ceiling, and adjacent walls
+    # Floor and ceiling are NOT trimmed — they extend toward camera only
+    if enable_trimming and semantic_label == 'wall':
         neighbor_planes = []
+        if floor_plane is not None:
+            neighbor_planes.append(floor_plane)
+        if ceiling_plane is not None:
+            neighbor_planes.append(ceiling_plane)
+        if wall_planes:
+            for wp, _ in wall_planes:
+                if not np.allclose(wp, plane_model, atol=1e-5):
+                    neighbor_planes.append(wp)
 
-        if semantic_label == 'wall':
-            if floor_plane is not None:
-                neighbor_planes.append(floor_plane)
-            if ceiling_plane is not None:
-                neighbor_planes.append(ceiling_plane)
-            if wall_planes:
-                for wp, _ in wall_planes:
-                    if not np.allclose(wp, plane_model, atol=1e-5):
-                        neighbor_planes.append(wp)
-        elif semantic_label in ['floor', 'ceiling']:
-            if wall_planes:
-                neighbor_planes = [wp for wp, _ in wall_planes]
-
-        print(f"[Mesh Gen] Clipping {semantic_label} against {len(neighbor_planes)} neighbors")
+        print(f"[Mesh Gen] Clipping wall against {len(neighbor_planes)} neighbors")
 
         for neighbor in neighbor_planes:
             polygon = clip_polygon_by_neighbor_plane(
@@ -127,7 +123,7 @@ def generate_low_poly_mesh(
                 neighbor
             )
             if polygon.is_empty or polygon.area < 0.01:
-                print(f"[Mesh Gen] {semantic_label} polygon too small after clipping, skipping")
+                print(f"[Mesh Gen] Wall polygon too small after clipping, skipping")
                 return None
 
     # Convert polygon to mesh
