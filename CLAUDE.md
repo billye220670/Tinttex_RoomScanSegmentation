@@ -82,9 +82,15 @@ Access at: http://localhost:8000
 - **Crosshair + Marker Sphere** (spatial mapping aid):
   - Preview canvas cursor set to `crosshair`
   - `mousemove` on preview canvas casts a ray from `fixedCamera` through NDC coords, intersects `lowPolyGroup` meshes
-  - Hit → yellow glowing sphere (`markerSphere`) appears at the 3D intersection point in the main scene
-  - Miss or `mouseleave` → sphere hidden
-  - Layer isolation: `markerSphere` on layer 1; `camera.layers.enable(1)` lets main camera see it; `fixedCamera` stays on layer 0 only so it never renders in the preview
+  - Hit → marker object appears at the 3D intersection point in the main scene
+  - Miss or `mouseleave` → marker hidden
+  - Layer isolation: marker children on layer 1; `camera.layers.enable(1)` lets main camera see them; `fixedCamera` stays on layer 0 only
+  - **Marker shape selector** (dropdown in preview-controls): Point (glow dot) / Cone / Square / Sphere
+    - `setMarkerShape(shape)` calls `rebuildMarkerGeometry()` which disposes old children and builds new ones
+    - Cone: base at hit point, tip points +Y (natural axis)
+    - Square: `PlaneGeometry` pre-rotated −90° on X → lies flat, normal faces +Y
+    - Sphere: larger ball with glow
+  - **Align to face normal** checkbox: when enabled, `markerSphere.quaternion.setFromUnitVectors(Y_UP, worldNormal)` where `worldNormal = face.normal.transformDirection(object.matrixWorld)`; when disabled, quaternion reset to identity
 
 ### Semantic Classification Logic
 - **Floor**: Horizontal plane (parallel to calibrated up-vector) with lowest Y position
