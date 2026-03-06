@@ -41,21 +41,26 @@ Access at: http://localhost:8000
   3. **semantic_classification.py**: 语义分类（floor/ceiling/wall）
      - **Critical**: Calibrates gravity direction from largest horizontal planes before classification
      - Uses angle tolerance to classify planes relative to calibrated up-vector
-  4. **mesh_generation.py**: Alpha Shape凹包生成低模网格
+  4. **mesh_generation.py**: Phase 1 expanded rectangle mesh generation
+     - Projects plane points to 2D, computes bbox, expands by expand_margin
+  5. **plane_intersection.py**: Phase 2 trimming via half-plane intersection
+     - `clip_polygon_by_neighbor_plane()` clips each mesh by neighbor plane intersection lines
 
 ### Data Flow
 1. Frontend sends parameters (voxel_size, distance_threshold, angle_tolerance, etc.) via JSON
-2. Backend processes TestScene.glb through 4-step pipeline
+2. Backend processes TestScene.glb through pipeline steps
 3. Returns base64-encoded GLB with color-coded meshes (green=floor, red=ceiling, blue=walls)
 4. Frontend overlays low-poly result on semi-transparent original model
 
 ## API Endpoints
 
-- `POST /api/extract` - Full pipeline (all 4 steps)
+- `POST /api/extract` - Full pipeline (all steps, always trims)
 - `POST /api/step1-preprocess` - Point cloud preprocessing only
-- `POST /api/step2-extract-planes` - RANSAC plane extraction
-- `POST /api/step3-classify` - Semantic classification with colors
-- `POST /api/step4-generate-mesh` - Final low-poly mesh generation
+- `POST /api/compute-fov` - Compute optimal preview FOV from cached point cloud (no body)
+- `POST /api/step2-extract-planes` - RANSAC plane extraction (UI: Step 3)
+- `POST /api/step3-classify` - Semantic classification with colors (UI: Step 4)
+- `POST /api/step4-generate-mesh` - Low-poly mesh generation, no trimming (UI: Step 5)
+- `POST /api/step5-trim-mesh` - Mesh generation with Phase 2 trimming (UI: Step 6)
 - `GET /TestScene.glb` - Serve the input 3D model
 - `GET /Raw.png` - Serve the preview camera background reference image
 
@@ -70,6 +75,10 @@ Access at: http://localhost:8000
 - Aspect ratio locked to Raw.png dimensions (3414:2560)
 - Transparent rendering: `scene.background` temporarily set to `null` during preview render to show background image
 - Canvas positioned with z-index:2 over background image (z-index:1)
+- **Auto FOV** (`/api/compute-fov`): Computes minimum vertical FOV to cover all front-facing points
+  - Uses 99.5th percentile of required per-point FOV (robust to outlier noise)
+  - Maps horizontal spread to equivalent vertical via aspect ratio before taking max
+  - Requires Step 1 (preprocess) to be run first to populate `_cached_pcd`
 
 ### Semantic Classification Logic
 - **Floor**: Horizontal plane (parallel to calibrated up-vector) with lowest Y position
@@ -83,6 +92,23 @@ Access at: http://localhost:8000
 - Point cloud caching (`_cached_pcd`) to avoid reprocessing in step-by-step mode
 - Sample limiting (50k points max) to prevent browser OOM
 
+### Phase 1/2 Mesh Expansion
+- **Phase 1**: Project plane points to 2D → compute bounding box → expand by `expand_margin` → generate rectangular mesh
+  - Walls/floor: bbox also includes camera projection at (0,0,0) onto the plane
+- **Phase 2 (Step 6/api/step5-trim-mesh)**: Clip each expanded rectangle using neighbor plane intersection lines
+  - Walls: clipped by floor, ceiling, and other walls
+  - Floor/ceiling: clipped by all walls
+  - Core function: `clip_polygon_by_neighbor_plane()` in `backend/algorithms/plane_intersection.py`
+  - Requires `shapely==2.0.3`
+
+### Step-by-Step UI (6 steps)
+1. **Step 1**: Preprocess — loads GLB, voxel-downsamples, estimates normals, caches point cloud
+2. **Step 2**: Compute FOV — auto-fills FOV slider with optimal value (requires Step 1 first)
+3. **Step 3**: Extract Planes — runs Sequential RANSAC on cached point cloud
+4. **Step 4**: Classify — semantic labeling (floor/ceiling/wall) with colors
+5. **Step 5**: Generate Mesh — Phase 1 expanded rectangles, no trimming
+6. **Step 6**: Trim Mesh — Phase 1 + Phase 2 trimming applied
+
 ## Common Parameters
 
 - **voxel_size** (0.01-0.2, default 0.05): Point cloud downsampling density
@@ -90,6 +116,7 @@ Access at: http://localhost:8000
 - **angle_tolerance** (1.0-15.0°, default 5.0): Semantic classification strictness
 - **cluster_radius** (0.05-0.30, default 0.10): DBSCAN connectivity radius
 - **min_cluster_size** (100-2000, default 500): Minimum points per wall cluster
+- **expand_margin** (0.0-3.0m, default 1.5m): Phase 1 outward expansion per plane
 
 ## File Locations
 
