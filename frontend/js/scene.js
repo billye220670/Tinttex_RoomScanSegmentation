@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { ViewportRaycaster } from './viewport-raycaster.js';
 
 let scene, camera, renderer, controls;
 let originalModel = null;
@@ -8,10 +9,11 @@ let lowPolyGroup = null;
 let currentLowPolyData = null;
 let markerSphere = null;
 let markerShape = 'point';
-let alignToNormal = false;
+let alignToNormal = true;
 
 // Camera preview viewport
 let fixedCamera, previewRenderer;
+const _previewRaycaster = new ViewportRaycaster();
 
 // Display mode state per label: 'solid' | 'checker' | 'grid'
 const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
@@ -484,6 +486,10 @@ export function getCurrentLowPolyData() {
     return currentLowPolyData;
 }
 
+export function hideOriginalModel() {
+    if (originalModel) originalModel.visible = false;
+}
+
 export function initCameraPreview() {
     const container = document.getElementById('camera-preview-container');
 
@@ -533,24 +539,19 @@ function onPreviewResize() {
 function onPreviewMouseMove(event) {
     if (!lowPolyGroup || !markerSphere) return;
 
-    const canvas = previewRenderer.domElement;
-    const rect = canvas.getBoundingClientRect();
-    const ndcX =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
-    const ndcY = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), fixedCamera);
-
     const meshes = [];
     lowPolyGroup.traverse(child => { if (child.isMesh) meshes.push(child); });
 
-    const hits = raycaster.intersectObjects(meshes, false);
-    if (hits.length > 0) {
-        markerSphere.position.copy(hits[0].point);
+    const hit = _previewRaycaster.cast(
+        event, previewRenderer.domElement, fixedCamera, meshes
+    );
 
-        if (alignToNormal && hits[0].face) {
-            const worldNormal = hits[0].face.normal.clone()
-                .transformDirection(hits[0].object.matrixWorld);
+    if (hit) {
+        markerSphere.position.copy(hit.point);
+
+        if (alignToNormal && hit.face) {
+            const worldNormal = hit.face.normal.clone()
+                .transformDirection(hit.object.matrixWorld);
             markerSphere.quaternion.setFromUnitVectors(
                 new THREE.Vector3(0, 1, 0), worldNormal
             );

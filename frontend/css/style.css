@@ -124,68 +124,12 @@ body {
 }
 
 .preview-controls {
-    padding: clamp(5px, 0.7vmin, 10px) clamp(8px, 1vmin, 15px);
     background: #1a1a1a;
     display: flex;
     flex-direction: column;
-    gap: clamp(4px, 0.55vmin, 7px);
+    gap: 0;
     border-bottom: 1px solid #2a2a2a;
-}
-
-.preview-control-row {
-    display: flex;
-    align-items: center;
-    gap: clamp(6px, 0.9vmin, 12px);
-}
-
-.preview-control-row label {
-    font-size: clamp(10px, 1vmin, 12px);
-    font-weight: 500;
-    white-space: nowrap;
-    min-width: clamp(60px, 7vmin, 88px);
-    color: #aaa;
-}
-
-.preview-control-row input[type="range"] {
-    flex: 1;
-    height: 5px;
-    background: #333;
-    border-radius: 3px;
-    outline: none;
-    -webkit-appearance: none;
-}
-
-.preview-control-row input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
-    background: #2196F3;
-    border-radius: 50%;
-    cursor: pointer;
-}
-
-.preview-control-row input[type="range"]::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    background: #2196F3;
-    border-radius: 50%;
-    cursor: pointer;
-    border: none;
-}
-
-.preview-control-row .checkbox-label {
-    min-width: unset;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-}
-
-.preview-control-row .checkbox-label input[type="checkbox"] {
-    accent-color: #2196F3;
-    width: 13px;
-    height: 13px;
-    cursor: pointer;
+    padding: clamp(3px, 0.4vmin, 5px) 0;
 }
 
 /* Params Section - scrollable */
@@ -294,33 +238,179 @@ button {
     background: #388E3C;
 }
 
+/* Preview pair rows: two controls side-by-side */
+.preview-pair-row {
+    display: flex;
+    gap: clamp(8px, 1.2vmin, 16px);
+    padding: clamp(4px, 0.6vmin, 8px) clamp(8px, 1vmin, 15px);
+}
+
+.preview-pair-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(2px, 0.3vmin, 4px);
+    min-width: 0;
+}
+
+.preview-pair-item label {
+    font-size: clamp(10px, 1vmin, 12px);
+    font-weight: 500;
+    color: #aaa;
+    white-space: nowrap;
+}
+
+.preview-pair-item input[type="range"] {
+    width: 100%;
+    height: 5px;
+    background: #333;
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+}
+
+.preview-pair-item input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px;
+    height: 13px;
+    background: #2196F3;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.preview-pair-item input[type="range"]::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    background: #2196F3;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+.preview-pair-center {
+    justify-content: center;
+}
+
+.preview-pair-item .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: clamp(10px, 1vmin, 12px);
+    color: #aaa;
+    white-space: nowrap;
+}
+
+.preview-pair-item .checkbox-label input[type="checkbox"] {
+    accent-color: #2196F3;
+    width: 13px;
+    height: 13px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+/* Step-by-step accordion */
 .step-controls {
-    margin: clamp(9px, 1.3vmin, 16px) 0;
-    padding: clamp(9px, 1.3vmin, 16px);
+    margin: clamp(8px, 1.2vmin, 15px) 0;
+    padding: clamp(8px, 1.2vmin, 15px);
     background: #1a1a1a;
     border-radius: 8px;
 }
 
 .step-controls h3 {
-    margin-bottom: clamp(7px, 1vmin, 12px);
+    margin-bottom: clamp(6px, 0.9vmin, 10px);
 }
 
-.btn-step {
-    background: #383838;
-    color: #ccc;
-    margin-bottom: clamp(4px, 0.55vmin, 6px);
-    font-size: clamp(10px, 1.05vmin, 12px);
-    padding: clamp(6px, 0.85vmin, 9px);
-}
-
-.btn-step:hover:not(:disabled) {
-    background: #4a4a4a;
-}
-
-.btn-step:disabled {
+.step-item {
+    margin-bottom: clamp(2px, 0.35vmin, 4px);
+    border-radius: 5px;
+    overflow: hidden;
     background: #2a2a2a;
+}
+
+.step-header {
+    display: flex;
+    align-items: center;
+    gap: clamp(5px, 0.7vmin, 8px);
+    padding: clamp(5px, 0.75vmin, 9px) clamp(8px, 1.1vmin, 14px);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.step-header:hover {
+    background: #333;
+}
+
+.step-header-flat {
+    cursor: default;
+}
+
+.step-header-flat:hover {
+    background: #2a2a2a;
+}
+
+.step-arrow {
+    font-size: clamp(8px, 0.8vmin, 10px);
     color: #555;
+    width: clamp(9px, 1vmin, 12px);
+    flex-shrink: 0;
+    transition: transform 0.15s;
+    display: inline-block;
+}
+
+.step-arrow.open {
+    transform: rotate(90deg);
+}
+
+.step-arrow-ph {
+    width: clamp(9px, 1vmin, 12px);
+    flex-shrink: 0;
+}
+
+.step-name {
+    flex: 1;
+    font-size: clamp(10px, 1.05vmin, 12px);
+    color: #ccc;
+    font-weight: 500;
+}
+
+.btn-step-run {
+    background: #383838;
+    color: #aaa;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: clamp(3px, 0.4vmin, 5px) clamp(9px, 1.2vmin, 14px);
+    font-size: clamp(9px, 0.95vmin, 11px);
+    cursor: pointer;
+    width: auto;
+    margin: 0;
+    font-weight: 600;
+    transition: background 0.15s;
+    flex-shrink: 0;
+}
+
+.btn-step-run:hover:not(:disabled) {
+    background: #4a4a4a;
+    color: #e0e0e0;
+    border-color: #555;
+}
+
+.btn-step-run:disabled {
+    background: #222;
+    color: #444;
+    border-color: #333;
     cursor: not-allowed;
+}
+
+.step-body {
+    padding: clamp(8px, 1.1vmin, 14px) clamp(12px, 1.6vmin, 20px) clamp(6px, 0.9vmin, 10px);
+    background: #1e1e1e;
+    border-top: 1px solid #333;
+}
+
+.step-body.collapsed {
+    display: none;
 }
 
 .hidden {
@@ -387,6 +477,11 @@ button {
     cursor: pointer;
     outline: none;
     max-width: clamp(88px, 11vmin, 120px);
+}
+
+.preview-pair-item .dm-select {
+    max-width: 100%;
+    width: 100%;
 }
 
 .dm-select:focus {

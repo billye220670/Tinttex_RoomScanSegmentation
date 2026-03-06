@@ -107,6 +107,24 @@ export function initUI(callbacks) {
     step5Button.addEventListener('click', () => callbacks.onStep5(getParams()));
     step6Button.addEventListener('click', () => callbacks.onStep6(getParams()));
     downloadButton.addEventListener('click', () => callbacks.onDownload());
+
+    // Accordion toggle for step headers
+    document.querySelectorAll('.step-header[data-target]').forEach(header => {
+        header.addEventListener('click', (e) => {
+            if (e.target.closest('.btn-step-run')) return;
+            const bodyId = header.dataset.target;
+            if (!bodyId) return;
+            const body = document.getElementById(bodyId);
+            if (!body) return;
+            body.classList.toggle('collapsed');
+            const arrow = header.querySelector('.step-arrow');
+            if (arrow) arrow.classList.toggle('open', !body.classList.contains('collapsed'));
+        });
+    });
+
+    // Apply initial values
+    if (callbacks.onPreviewOpacityChange) callbacks.onPreviewOpacityChange(parseInt(overlayOpacitySlider.value));
+    if (callbacks.onAlignToNormalChange) callbacks.onAlignToNormalChange(alignToNormalCheckbox.checked);
 }
 
 export function showLoading(message = 'Processing...') {

@@ -63,6 +63,7 @@ async def extract_planes(request: ExtractionRequest):
     """
     Extract semantic planes from TestScene.glb and return low-poly GLB
     """
+    global _cached_pcd
     try:
         # Validate parameters
         if not (0.01 <= request.voxel_size <= 0.2):
@@ -85,6 +86,7 @@ async def extract_planes(request: ExtractionRequest):
 
         print("Estimating normals...")
         pcd = estimate_normals(pcd)
+        _cached_pcd = pcd
 
         # Step 2: Extract planes
         print(f"Extracting planes with distance_threshold={request.distance_threshold}...")

@@ -1,4 +1,4 @@
-import { initScene, loadOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode, setMarkerShape, setAlignToNormal } from './scene.js';
+import { initScene, loadOriginalModel, hideOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode, setMarkerShape, setAlignToNormal } from './scene.js';
 import { initUI, showLoading, hideLoading, setButtonEnabled, showDownloadButton, updateStats, showError, setFOVSliderValue } from './ui.js';
 
 // Initialize application
@@ -57,6 +57,7 @@ async function runStep1(params) {
         const result = await response.json();
         showLoading('Rendering preprocessed point cloud...');
         await addLowPolyOverlay(result.glb_data);
+        hideOriginalModel();
 
         updateStats({ ...result.stats, step: 'Step 1: Preprocessed' });
         hideLoading();
@@ -237,12 +238,24 @@ async function runExtraction(params) {
         // Add low-poly overlay
         showLoading('Rendering low-poly mesh...');
         await addLowPolyOverlay(result.glb_data);
+        hideOriginalModel();
 
         // Update stats
         updateStats(result.stats);
 
         // Show download button
         showDownloadButton();
+
+        // Also compute FOV after full extraction
+        showLoading('Computing optimal FOV...');
+        try {
+            const fovResp = await fetch('/api/compute-fov', { method: 'POST' });
+            if (fovResp.ok) {
+                const { fov } = await fovResp.json();
+                setFOVSliderValue(fov);
+                updateCameraFOV(fov);
+            }
+        } catch (_) { /* non-fatal */ }
 
         hideLoading();
     } catch (error) {
