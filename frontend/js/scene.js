@@ -864,10 +864,14 @@ export function setGizmoMode(mode) {
         }
     } else if (transformControls) {
         transformControls.setMode(mode);
-        // Keep gizmo attached if something is currently selected
+        // Only attach gizmo if model is selected, not for wall/ceiling/floor
         const selected = _selectionManager?.getSelected();
-        if (selected) {
+        if (selected && selected.type === 'model') {
             _attachGizmo(selected.object);
+        } else {
+            // Detach if selected object is not a model
+            transformControls.detach();
+            transformControls.visible = false;
         }
     }
 }
