@@ -79,6 +79,12 @@ Access at: http://localhost:8000
   - Uses 99.5th percentile of required per-point FOV (robust to outlier noise)
   - Maps horizontal spread to equivalent vertical via aspect ratio before taking max
   - Requires Step 1 (preprocess) to be run first to populate `_cached_pcd`
+- **Crosshair + Marker Sphere** (spatial mapping aid):
+  - Preview canvas cursor set to `crosshair`
+  - `mousemove` on preview canvas casts a ray from `fixedCamera` through NDC coords, intersects `lowPolyGroup` meshes
+  - Hit → yellow glowing sphere (`markerSphere`) appears at the 3D intersection point in the main scene
+  - Miss or `mouseleave` → sphere hidden
+  - Layer isolation: `markerSphere` on layer 1; `camera.layers.enable(1)` lets main camera see it; `fixedCamera` stays on layer 0 only so it never renders in the preview
 
 ### Semantic Classification Logic
 - **Floor**: Horizontal plane (parallel to calibrated up-vector) with lowest Y position

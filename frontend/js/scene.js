@@ -6,6 +6,7 @@ let scene, camera, renderer, controls;
 let originalModel = null;
 let lowPolyGroup = null;
 let currentLowPolyData = null;
+let markerSphere = null;
 
 // Camera preview viewport
 let fixedCamera, previewRenderer;
@@ -62,6 +63,10 @@ export function initScene() {
     scene.add(gridHelper);
 
     window.addEventListener('resize', onWindowResize);
+
+    camera.layers.enable(1);
+    createMarker();
+
     animate();
 }
 
@@ -69,6 +74,28 @@ function animate() {
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
+}
+
+function createMarker() {
+    const innerGeo = new THREE.SphereGeometry(0.04, 16, 16);
+    const innerMat = new THREE.MeshBasicMaterial({ color: 0xffee00 });
+    markerSphere = new THREE.Mesh(innerGeo, innerMat);
+    markerSphere.layers.set(1);
+    markerSphere.visible = false;
+
+    const outerGeo = new THREE.SphereGeometry(0.10, 16, 16);
+    const outerMat = new THREE.MeshBasicMaterial({
+        color: 0xffee00, transparent: true, opacity: 0.25, side: THREE.BackSide
+    });
+    const glowMesh = new THREE.Mesh(outerGeo, outerMat);
+    glowMesh.layers.set(1);
+    markerSphere.add(glowMesh);
+
+    const pt = new THREE.PointLight(0xffee00, 1.5, 2.0);
+    pt.layers.set(1);
+    markerSphere.add(pt);
+
+    scene.add(markerSphere);
 }
 
 function onWindowResize() {
@@ -405,6 +432,10 @@ export function initCameraPreview() {
     previewRenderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(previewRenderer.domElement);
 
+    previewRenderer.domElement.style.cursor = 'crosshair';
+    previewRenderer.domElement.addEventListener('mousemove', onPreviewMouseMove);
+    previewRenderer.domElement.addEventListener('mouseleave', onPreviewMouseLeave);
+
     window.addEventListener('resize', onPreviewResize);
     animatePreview();
 }
@@ -417,6 +448,33 @@ function onPreviewResize() {
         fixedCamera.updateProjectionMatrix();
         previewRenderer.setSize(container.clientWidth, container.clientHeight, false);
     }
+}
+
+function onPreviewMouseMove(event) {
+    if (!lowPolyGroup || !markerSphere) return;
+
+    const canvas = previewRenderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const ndcX =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
+    const ndcY = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), fixedCamera);
+
+    const meshes = [];
+    lowPolyGroup.traverse(child => { if (child.isMesh) meshes.push(child); });
+
+    const hits = raycaster.intersectObjects(meshes, false);
+    if (hits.length > 0) {
+        markerSphere.position.copy(hits[0].point);
+        markerSphere.visible = true;
+    } else {
+        markerSphere.visible = false;
+    }
+}
+
+function onPreviewMouseLeave() {
+    if (markerSphere) markerSphere.visible = false;
 }
 
 function animatePreview() {
