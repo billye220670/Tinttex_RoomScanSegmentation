@@ -18,10 +18,11 @@ export function initUI(callbacks) {
     const runButton = document.getElementById('run-extraction');
     const downloadButton = document.getElementById('download-lowpoly');
     const step1Button = document.getElementById('step1-btn');
-    const step2Button = document.getElementById('step2-btn');
+    const step2FovButton = document.getElementById('step2-fov-btn');
     const step3Button = document.getElementById('step3-btn');
     const step4Button = document.getElementById('step4-btn');
     const step5Button = document.getElementById('step5-btn');
+    const step6Button = document.getElementById('step6-btn');
     const wallDisplaySelect = document.getElementById('wall-display-mode');
     const ceilingDisplaySelect = document.getElementById('ceiling-display-mode');
     const floorDisplaySelect = document.getElementById('floor-display-mode');
@@ -90,10 +91,11 @@ export function initUI(callbacks) {
     // Button handlers
     runButton.addEventListener('click', () => callbacks.onRunExtraction(getParams()));
     step1Button.addEventListener('click', () => callbacks.onStep1(getParams()));
-    step2Button.addEventListener('click', () => callbacks.onStep2(getParams()));
+    step2FovButton.addEventListener('click', () => callbacks.onComputeFOV());
     step3Button.addEventListener('click', () => callbacks.onStep3(getParams()));
     step4Button.addEventListener('click', () => callbacks.onStep4(getParams()));
     step5Button.addEventListener('click', () => callbacks.onStep5(getParams()));
+    step6Button.addEventListener('click', () => callbacks.onStep6(getParams()));
     downloadButton.addEventListener('click', () => callbacks.onDownload());
 }
 
@@ -112,17 +114,19 @@ export function hideLoading() {
 export function setButtonEnabled(enabled) {
     const runButton = document.getElementById('run-extraction');
     const step1Button = document.getElementById('step1-btn');
-    const step2Button = document.getElementById('step2-btn');
+    const step2FovButton = document.getElementById('step2-fov-btn');
     const step3Button = document.getElementById('step3-btn');
     const step4Button = document.getElementById('step4-btn');
     const step5Button = document.getElementById('step5-btn');
+    const step6Button = document.getElementById('step6-btn');
 
     runButton.disabled = !enabled;
     step1Button.disabled = !enabled;
-    step2Button.disabled = !enabled;
+    step2FovButton.disabled = !enabled;
     step3Button.disabled = !enabled;
     step4Button.disabled = !enabled;
     step5Button.disabled = !enabled;
+    step6Button.disabled = !enabled;
 }
 
 export function showDownloadButton() {
@@ -155,4 +159,10 @@ export function updateStats(stats) {
 
 export function showError(message) {
     alert(`Error: ${message}`);
+}
+
+export function setFOVSliderValue(fov) {
+    const clamped = Math.round(Math.max(30, Math.min(120, fov)));
+    document.getElementById('fov-slider').value = clamped;
+    document.getElementById('fov-value').textContent = clamped;
 }

@@ -243,6 +243,37 @@ async def step1_preprocess(request: ExtractionRequest):
         raise HTTPException(status_code=500, detail=f"Step 1 failed: {str(e)}")
 
 
+@app.post("/api/compute-fov")
+async def compute_fov():
+    """Compute optimal vertical FOV so all front-facing points fit in preview viewport"""
+    global _cached_pcd
+    if _cached_pcd is None:
+        raise HTTPException(status_code=400, detail="Run Step 1 first")
+
+    try:
+        points = np.asarray(_cached_pcd.points)
+        aspect = 3414 / 2560
+
+        # After 180° X rotation, front-facing points have z < 0
+        front_mask = points[:, 2] < 0
+        front_points = points[front_mask]
+
+        if len(front_points) == 0:
+            return JSONResponse({'fov': 60.0})
+
+        depths = -front_points[:, 2]
+        half_v = np.arctan(np.abs(front_points[:, 1]) / depths)
+        half_h_as_v = np.arctan(np.abs(front_points[:, 0]) / (depths * aspect))
+
+        required_fov = np.degrees(2 * np.maximum(half_v, half_h_as_v))
+        fov = float(np.percentile(required_fov, 99.5))
+        fov = max(30.0, min(120.0, fov))
+
+        return JSONResponse({'fov': round(fov, 1)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"FOV computation failed: {str(e)}")
+
+
 @app.post("/api/step2-extract-planes")
 async def step2_extract_planes(request: ExtractionRequest):
     """Step 2: Extract planes using RANSAC"""

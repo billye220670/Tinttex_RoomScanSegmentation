@@ -1,5 +1,5 @@
 import { initScene, loadOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode } from './scene.js';
-import { initUI, showLoading, hideLoading, setButtonEnabled, showDownloadButton, updateStats, showError } from './ui.js';
+import { initUI, showLoading, hideLoading, setButtonEnabled, showDownloadButton, updateStats, showError, setFOVSliderValue } from './ui.js';
 
 // Initialize application
 async function init() {
@@ -25,10 +25,11 @@ async function init() {
         onRunExtraction: runExtraction,
         onDownload: downloadLowPoly,
         onStep1: runStep1,
-        onStep2: runStep2,
+        onComputeFOV: runComputeFOV,
         onStep3: runStep3,
         onStep4: runStep4,
         onStep5: runStep5,
+        onStep6: runStep6,
         onFOVChange: updateCameraFOV,
         onPreviewOpacityChange: setPreviewOpacity,
         onDisplayModeChange: setDisplayMode
@@ -65,27 +66,21 @@ async function runStep1(params) {
     }
 }
 
-async function runStep2(params) {
+async function runComputeFOV() {
     setButtonEnabled(false);
-    showLoading('Step 2: Extracting planes...');
+    showLoading('Step 2: Computing optimal FOV...');
 
     try {
-        const response = await fetch('/api/step2-extract-planes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(params)
-        });
+        const response = await fetch('/api/compute-fov', { method: 'POST' });
 
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.detail || 'Step 2 failed');
+            throw new Error(error.detail || 'FOV computation failed');
         }
 
-        const result = await response.json();
-        showLoading('Rendering extracted planes...');
-        await addLowPolyOverlay(result.glb_data);
-
-        updateStats({ ...result.stats, step: 'Step 2: Planes Extracted' });
+        const { fov } = await response.json();
+        setFOVSliderValue(fov);
+        updateCameraFOV(fov);
         hideLoading();
     } catch (error) {
         hideLoading();
@@ -97,10 +92,10 @@ async function runStep2(params) {
 
 async function runStep3(params) {
     setButtonEnabled(false);
-    showLoading('Step 3: Classifying planes...');
+    showLoading('Step 3: Extracting planes...');
 
     try {
-        const response = await fetch('/api/step3-classify', {
+        const response = await fetch('/api/step2-extract-planes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
@@ -112,10 +107,10 @@ async function runStep3(params) {
         }
 
         const result = await response.json();
-        showLoading('Rendering classified planes...');
+        showLoading('Rendering extracted planes...');
         await addLowPolyOverlay(result.glb_data);
 
-        updateStats({ ...result.stats, step: 'Step 3: Classified' });
+        updateStats({ ...result.stats, step: 'Step 3: Planes Extracted' });
         hideLoading();
     } catch (error) {
         hideLoading();
@@ -127,10 +122,10 @@ async function runStep3(params) {
 
 async function runStep4(params) {
     setButtonEnabled(false);
-    showLoading('Step 4: Generating meshes...');
+    showLoading('Step 4: Classifying planes...');
 
     try {
-        const response = await fetch('/api/step4-generate-mesh', {
+        const response = await fetch('/api/step3-classify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
@@ -142,11 +137,10 @@ async function runStep4(params) {
         }
 
         const result = await response.json();
-        showLoading('Rendering final meshes...');
+        showLoading('Rendering classified planes...');
         await addLowPolyOverlay(result.glb_data);
 
-        updateStats({ ...result.stats, step: 'Step 4: Mesh Generated' });
-        showDownloadButton();
+        updateStats({ ...result.stats, step: 'Step 4: Classified' });
         hideLoading();
     } catch (error) {
         hideLoading();
@@ -158,10 +152,10 @@ async function runStep4(params) {
 
 async function runStep5(params) {
     setButtonEnabled(false);
-    showLoading('Step 5: Trimming meshes...');
+    showLoading('Step 5: Generating meshes...');
 
     try {
-        const response = await fetch('/api/step5-trim-mesh', {
+        const response = await fetch('/api/step4-generate-mesh', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
@@ -173,10 +167,41 @@ async function runStep5(params) {
         }
 
         const result = await response.json();
+        showLoading('Rendering final meshes...');
+        await addLowPolyOverlay(result.glb_data);
+
+        updateStats({ ...result.stats, step: 'Step 5: Mesh Generated' });
+        showDownloadButton();
+        hideLoading();
+    } catch (error) {
+        hideLoading();
+        showError(error.message);
+    } finally {
+        setButtonEnabled(true);
+    }
+}
+
+async function runStep6(params) {
+    setButtonEnabled(false);
+    showLoading('Step 6: Trimming meshes...');
+
+    try {
+        const response = await fetch('/api/step5-trim-mesh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Step 6 failed');
+        }
+
+        const result = await response.json();
         showLoading('Rendering trimmed meshes...');
         await addLowPolyOverlay(result.glb_data);
 
-        updateStats({ ...result.stats, step: 'Step 5: Mesh Trimmed' });
+        updateStats({ ...result.stats, step: 'Step 6: Mesh Trimmed' });
         showDownloadButton();
         hideLoading();
     } catch (error) {
