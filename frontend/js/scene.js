@@ -27,6 +27,7 @@ const _mainRaycaster = new ViewportRaycaster();
 let transformControls = null;
 let transformMode = 'translate'; // 'translate'|'rotate'|'scale'|'select'
 let _lastScalePerAxis = { x: 1, y: 1, z: 1 }; // Track scale to prevent over-scaling
+let _justFinishedDragging = false; // Prevent click after dragging from deselecting
 
 // Display mode state per label: 'solid' | 'checker' | 'grid'
 const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
@@ -76,10 +77,10 @@ export function initScene() {
         // Constrain scale to prevent over-scaling and negative scale
         if (transformMode === 'scale' && transformControls.object) {
             const obj = transformControls.object;
-            // Clamp scale to reasonable range [0.1, 10] per axis
-            obj.scale.x = Math.max(0.1, Math.min(10, obj.scale.x));
-            obj.scale.y = Math.max(0.1, Math.min(10, obj.scale.y));
-            obj.scale.z = Math.max(0.1, Math.min(10, obj.scale.z));
+            // Clamp scale to max 10 per axis, no minimum limit
+            obj.scale.x = Math.min(10, obj.scale.x);
+            obj.scale.y = Math.min(10, obj.scale.y);
+            obj.scale.z = Math.min(10, obj.scale.z);
 
             // Prevent negative scale
             if (obj.scale.x < 0) obj.scale.x = -obj.scale.x;
@@ -91,14 +92,13 @@ export function initScene() {
     transformControls.addEventListener('dragging-changed', (event) => {
         controls.enabled = !event.value;
 
-        // When dragging stops, keep the gizmo attached if object is still selected
-        // and not in select mode
-        if (!event.value && transformMode !== 'select') {
-            const selected = _selectionManager?.getSelected();
-            if (selected && transformControls.object) {
-                // Gizmo is already attached, just ensure visibility
-                transformControls.visible = true;
-            }
+        // When dragging stops, keep the gizmo attached and prevent click from deselecting
+        if (!event.value) {
+            _justFinishedDragging = true;
+            // Reset the flag after a short delay so next click won't be ignored
+            setTimeout(() => {
+                _justFinishedDragging = false;
+            }, 100);
         }
     });
 
@@ -718,6 +718,11 @@ export function initSelectionSystem(onSelectionChange) {
 
     // Click listener on main viewport
     renderer.domElement.addEventListener('click', (event) => {
+        // Ignore click right after dragging to preserve selection state
+        if (_justFinishedDragging) {
+            return;
+        }
+
         const meshes = [];
         if (lowPolyGroup) {
             lowPolyGroup.traverse(child => { if (child.isMesh) meshes.push(child); });
@@ -764,9 +769,11 @@ export function initSelectionSystem(onSelectionChange) {
             const selected = _selectionManager.getSelected();
             if (selected) {
                 console.log(`Selected: ${selected.object?.name || '(unnamed)'} [${selected.type}]`);
-                // Attach gizmo only if not in select mode
-                if (transformMode !== 'select') {
+                // Only attach gizmo for model type; wall/ceiling/floor can be selected but not transformed
+                if (transformMode !== 'select' && selected.type === 'model') {
                     _attachGizmo(selected.object);
+                } else {
+                    _detachGizmo();
                 }
             } else {
                 console.log(`No valid target for selection type: ${_selectionManager.selectionType}`);
