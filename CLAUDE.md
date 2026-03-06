@@ -113,6 +113,12 @@ Access at: http://localhost:8000
   - Core function: `clip_polygon_by_neighbor_plane()` in `backend/algorithms/plane_intersection.py`
   - Requires `shapely==2.0.3`
 
+### Normal Orientation
+- `_orient_toward_origin(mesh)` called after `mesh.fix_normals()` in every mesh generation path
+- Logic: `to_origin = -mesh.centroid`; if `dot(avg_face_normal, to_origin) < 0` → `mesh.faces = mesh.faces[:, ::-1]`
+- Assigning via property setter invalidates trimesh cache so normals recompute automatically
+- Guarantees all walls/floor/ceiling normals face room interior for all steps (5 and 6)
+
 ### Step-by-Step UI (6 steps)
 1. **Step 1**: Preprocess — loads GLB, voxel-downsamples, estimates normals, caches point cloud
 2. **Step 2**: Compute FOV — auto-fills FOV slider with optimal value (requires Step 1 first)
