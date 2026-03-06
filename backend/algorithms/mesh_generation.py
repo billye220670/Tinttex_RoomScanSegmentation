@@ -22,6 +22,23 @@ def polygon_to_mesh_2d(polygon: Polygon) -> Tuple[Optional[np.ndarray], Optional
         return None, None
 
 
+def _orient_toward_origin(mesh: trimesh.Trimesh) -> None:
+    """
+    Flip face windings if the mesh normals point away from the room interior.
+
+    The camera (origin) is always inside the room, so every surface normal
+    should have a positive dot product with the vector from the mesh centroid
+    to the origin.  Assigning mesh.faces via the property setter invalidates
+    the trimesh cache so face_normals are recomputed automatically.
+    """
+    if len(mesh.face_normals) == 0:
+        return
+    to_origin = -mesh.centroid          # vector: centroid → (0,0,0)
+    avg_normal = mesh.face_normals.mean(axis=0)
+    if np.dot(avg_normal, to_origin) < 0:
+        mesh.faces = mesh.faces[:, ::-1]   # reverse winding → flip normals
+
+
 def project_to_2d(points: np.ndarray, plane_normal: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Project 3D points to 2D plane coordinate system.
@@ -143,6 +160,7 @@ def generate_low_poly_mesh(
             process=False
         )
         mesh.fix_normals()
+        _orient_toward_origin(mesh)
 
         print(f"[Mesh Gen] Generated mesh: {len(vertices_3d)} vertices, {len(faces)} faces")
         return mesh
