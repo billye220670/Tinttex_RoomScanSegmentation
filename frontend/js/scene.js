@@ -13,11 +13,12 @@ let fixedCamera, previewRenderer;
 // Display mode state per label: 'solid' | 'checker' | 'grid'
 const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
 const checkerTextures = {};
+const gridTextures = {};
 
 const CHECKER_COLORS = {
-    wall:    ['#90b8e8', '#d0e8ff'],
-    ceiling: ['#e89090', '#ffd0d0'],
-    floor:   ['#90c890', '#d0f0d0'],
+    wall:    ['#3a7abf', '#c8e0ff'],
+    ceiling: ['#bf3a3a', '#ffc8c8'],
+    floor:   ['#3a9e3a', '#c8f0c8'],
 };
 
 const SEMANTIC_COLORS = {
@@ -48,6 +49,7 @@ export function initScene() {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
+    controls.zoomSpeed = 0.35;
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
@@ -93,6 +95,58 @@ export function setPreviewOpacity(opacity) {
 export function setDisplayMode(label, mode) {
     displayModes[label] = mode;
     applyDisplayModes();
+}
+
+function createGridTexture(label) {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    // Transparent background — only lines are drawn
+    ctx.clearRect(0, 0, size, size);
+
+    const minorColors = {
+        wall:    'rgba(50, 120, 220, 0.55)',
+        ceiling: 'rgba(220, 50, 50, 0.55)',
+        floor:   'rgba(40, 160, 40, 0.55)',
+    };
+    const majorColors = {
+        wall:    'rgba(20, 80, 180, 0.9)',
+        ceiling: 'rgba(180, 20, 20, 0.9)',
+        floor:   'rgba(20, 130, 20, 0.9)',
+    };
+
+    const divisions = 16;
+    const step = size / divisions;
+
+    // Minor grid lines
+    ctx.strokeStyle = minorColors[label] || 'rgba(100,100,100,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i <= divisions; i++) {
+        const pos = i * step;
+        ctx.moveTo(pos, 0); ctx.lineTo(pos, size);
+        ctx.moveTo(0, pos); ctx.lineTo(size, pos);
+    }
+    ctx.stroke();
+
+    // Major grid lines every 4 cells
+    ctx.strokeStyle = majorColors[label] || 'rgba(60,60,60,0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i <= divisions; i += 4) {
+        const pos = i * step;
+        ctx.moveTo(pos, 0); ctx.lineTo(pos, size);
+        ctx.moveTo(0, pos); ctx.lineTo(size, pos);
+    }
+    ctx.stroke();
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    return tex;
 }
 
 function createCheckerTexture(label) {
@@ -216,9 +270,13 @@ function applyDisplayModes() {
                 side: THREE.DoubleSide
             });
         } else if (mode === 'grid') {
+            if (!gridTextures[label]) gridTextures[label] = createGridTexture(label);
+            if (!child.geometry.attributes.uv) {
+                generatePlanarUVs(child.geometry);
+            }
             child.material = new THREE.MeshBasicMaterial({
-                color,
-                wireframe: true,
+                map: gridTextures[label],
+                transparent: true,
                 side: THREE.DoubleSide
             });
         }
@@ -262,6 +320,12 @@ export function loadOriginalModel() {
                     center.z + size.z
                 );
 
+                // Set zoom limits based on actual model scale to prevent
+                // camera from passing through the target (which breaks orbit)
+                const maxDim = Math.max(size.x, size.y, size.z);
+                controls.minDistance = maxDim * 0.08;
+                controls.maxDistance = maxDim * 25;
+                controls.update();
                 resolve();
             },
             undefined,
