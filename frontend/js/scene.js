@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { ViewportRaycaster } from './viewport-raycaster.js';
+import { SelectionManager } from './selection-manager.js';
+import { DragDropLoader } from './drag-drop-loader.js';
 
 let scene, camera, renderer, controls;
 let originalModel = null;
@@ -14,6 +17,16 @@ let alignToNormal = true;
 // Camera preview viewport
 let fixedCamera, previewRenderer;
 const _previewRaycaster = new ViewportRaycaster();
+
+// Drag-drop and selection system
+let droppedModels = [];
+let _selectionManager = null;
+const _mainRaycaster = new ViewportRaycaster();
+
+// Transform gizmo
+let transformControls = null;
+let transformMode = 'translate'; // 'translate'|'rotate'|'scale'|'select'
+let _lastScalePerAxis = { x: 1, y: 1, z: 1 }; // Track scale to prevent over-scaling
 
 // Display mode state per label: 'solid' | 'checker' | 'grid'
 const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
@@ -49,12 +62,50 @@ export function initScene() {
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.sortObjects = true; // Ensure renderOrder is respected
     container.appendChild(renderer.domElement);
 
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.zoomSpeed = 0.35;
+
+    // Initialize Transform Gizmo
+    transformControls = new TransformControls(camera, renderer.domElement);
+    transformControls.addEventListener('change', () => {
+        // Constrain scale to prevent over-scaling and negative scale
+        if (transformMode === 'scale' && transformControls.object) {
+            const obj = transformControls.object;
+            // Clamp scale to reasonable range [0.1, 10] per axis
+            obj.scale.x = Math.max(0.1, Math.min(10, obj.scale.x));
+            obj.scale.y = Math.max(0.1, Math.min(10, obj.scale.y));
+            obj.scale.z = Math.max(0.1, Math.min(10, obj.scale.z));
+
+            // Prevent negative scale
+            if (obj.scale.x < 0) obj.scale.x = -obj.scale.x;
+            if (obj.scale.y < 0) obj.scale.y = -obj.scale.y;
+            if (obj.scale.z < 0) obj.scale.z = -obj.scale.z;
+        }
+        renderer.render(scene, camera);
+    });
+    transformControls.addEventListener('dragging-changed', (event) => {
+        controls.enabled = !event.value;
+
+        // When dragging stops, keep the gizmo attached if object is still selected
+        // and not in select mode
+        if (!event.value && transformMode !== 'select') {
+            const selected = _selectionManager?.getSelected();
+            if (selected && transformControls.object) {
+                // Gizmo is already attached, just ensure visibility
+                transformControls.visible = true;
+            }
+        }
+    });
+
+    // Configure gizmo to not be occluded by other objects
+    _configureGizmoRendering(transformControls);
+
+    scene.add(transformControls);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
@@ -580,4 +631,236 @@ function animatePreview() {
 
     // Restore original background
     scene.background = originalBackground;
+}
+
+// ========== Drag-Drop and Selection System ==========
+
+export function initDragDrop() {
+    const loader = new GLTFLoader();
+    const dragDropLoader = new DragDropLoader(renderer.domElement, loader);
+
+    dragDropLoader.init({
+        onDragEnter() {
+            const overlay = document.getElementById('drop-overlay');
+            if (overlay) overlay.classList.remove('hidden');
+        },
+        onDragLeave() {
+            const overlay = document.getElementById('drop-overlay');
+            if (overlay) overlay.classList.add('hidden');
+        },
+        onLoad(gltf, event) {
+            const overlay = document.getElementById('drop-overlay');
+            if (overlay) overlay.classList.add('hidden');
+
+            // Get drop position via raycasting
+            const meshes = [];
+            if (lowPolyGroup) {
+                lowPolyGroup.traverse(child => { if (child.isMesh) meshes.push(child); });
+            }
+
+            let worldPos = new THREE.Vector3(0, 0, 0);
+
+            // Try to intersect with low-poly meshes first
+            const hit = _mainRaycaster.cast(event, renderer.domElement, camera, meshes);
+            if (hit) {
+                worldPos.copy(hit.point);
+            } else if (meshes.length === 0) {
+                // Fallback: intersect with Y=0 plane
+                const raycaster = new THREE.Raycaster();
+                const mouse = new THREE.Vector2();
+                const rect = renderer.domElement.getBoundingClientRect();
+                const dpr = renderer.getPixelRatio();
+
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+                raycaster.ray.intersectPlane(plane, worldPos);
+            }
+
+            // Load and position model
+            const model = gltf.scene;
+            model.position.copy(worldPos);
+            scene.add(model);
+            droppedModels.push(model);
+
+            // Auto-switch to 'model' selection type when a model is dropped
+            if (_selectionManager) {
+                _selectionManager.setType('model');
+                // Update selection type dropdown if it exists
+                const selectElement = document.getElementById('selection-type');
+                if (selectElement) {
+                    selectElement.value = 'model';
+                }
+            }
+
+            console.log(`Dropped model at [${worldPos.x.toFixed(2)}, ${worldPos.y.toFixed(2)}, ${worldPos.z.toFixed(2)}]`);
+        },
+        onError(err) {
+            const overlay = document.getElementById('drop-overlay');
+            if (overlay) overlay.classList.add('hidden');
+            console.error('Drag-drop error:', err);
+        }
+    });
+}
+
+export function initSelectionSystem(onSelectionChange) {
+    _selectionManager = new SelectionManager(
+        scene,
+        getLabelFromMesh,
+        () => droppedModels
+    );
+
+    _selectionManager.onChange((selInfo) => {
+        onSelectionChange(selInfo);
+    });
+
+    // Click listener on main viewport
+    renderer.domElement.addEventListener('click', (event) => {
+        const meshes = [];
+        if (lowPolyGroup) {
+            lowPolyGroup.traverse(child => { if (child.isMesh) meshes.push(child); });
+        }
+
+        // Include dropped models for 'model' selection type
+        const droppedMeshes = [];
+        droppedModels.forEach(model => {
+            model.traverse(child => { if (child.isMesh) droppedMeshes.push(child); });
+        });
+
+        const allMeshes = [...meshes, ...droppedMeshes];
+
+        if (allMeshes.length === 0) {
+            console.warn('No meshes available for selection. Run extraction or drop models first.');
+            _selectionManager.deselect();
+            _detachGizmo();
+            return;
+        }
+
+        const hit = _mainRaycaster.cast(event, renderer.domElement, camera, allMeshes);
+
+        if (hit) {
+            console.log(`Hit object: ${hit.object.name || '(unnamed)'}, Type: ${hit.object.constructor.name}`);
+
+            // Auto-detect selection type based on what was hit
+            let targetType = 'model'; // Default to model
+            if (hit.object) {
+                const label = getLabelFromMesh(hit.object);
+                if (label === 'wall' || label === 'ceiling' || label === 'floor') {
+                    targetType = label;
+                } else if (hit.object.parent && hit.object.parent.isMesh) {
+                    const parentLabel = getLabelFromMesh(hit.object.parent);
+                    if (parentLabel === 'wall' || parentLabel === 'ceiling' || parentLabel === 'floor') {
+                        targetType = parentLabel;
+                    }
+                }
+            }
+
+            // Set the type and handle the hit
+            _selectionManager.setType(targetType);
+            _selectionManager.handleHit(hit);
+
+            const selected = _selectionManager.getSelected();
+            if (selected) {
+                console.log(`Selected: ${selected.object?.name || '(unnamed)'} [${selected.type}]`);
+                // Attach gizmo only if not in select mode
+                if (transformMode !== 'select') {
+                    _attachGizmo(selected.object);
+                }
+            } else {
+                console.log(`No valid target for selection type: ${_selectionManager.selectionType}`);
+                _detachGizmo();
+            }
+        } else {
+            console.log('No mesh hit by raycaster');
+            _selectionManager.deselect();
+            _detachGizmo();
+        }
+    });
+
+    // Keyboard shortcuts: Q=Select, W=Translate, E=Rotate, R=Scale
+    document.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+
+        if (key === 'q') {
+            setGizmoMode('select');
+            e.preventDefault();
+        } else if (key === 'w') {
+            setGizmoMode('translate');
+            e.preventDefault();
+        } else if (key === 'e') {
+            setGizmoMode('rotate');
+            e.preventDefault();
+        } else if (key === 'r') {
+            setGizmoMode('scale');
+            e.preventDefault();
+        }
+    });
+}
+
+function _attachGizmo(object) {
+    if (transformControls && object) {
+        transformControls.attach(object);
+        transformControls.setMode(transformMode);
+        // Ensure gizmo is visible and not occluded
+        transformControls.visible = true;
+    }
+}
+
+function _detachGizmo() {
+    if (transformControls) {
+        transformControls.detach();
+        transformControls.visible = false;
+    }
+}
+
+/**
+ * Configure TransformControls to render on top of all objects
+ * @private
+ */
+function _configureGizmoRendering(controls) {
+    // Set a high renderOrder to ensure gizmo is drawn last
+    controls.traverse((child) => {
+        if (child.isMesh) {
+            child.renderOrder = 100;
+            if (child.material) {
+                // Disable depth test so gizmo is not occluded
+                child.material.depthTest = false;
+                child.material.depthWrite = false;
+            }
+        }
+    });
+}
+
+export function setSelectionType(type) {
+    if (_selectionManager) {
+        _selectionManager.setType(type);
+    }
+}
+
+export function getLabelFromMeshPublic(mesh) {
+    return getLabelFromMesh(mesh);
+}
+
+export function getDroppedModels() {
+    return droppedModels;
+}
+
+export function setGizmoMode(mode) {
+    transformMode = mode;
+    if (mode === 'select') {
+        // Detach gizmo when entering select mode
+        if (transformControls) {
+            transformControls.detach();
+            transformControls.visible = false;
+        }
+    } else if (transformControls) {
+        transformControls.setMode(mode);
+        // Keep gizmo attached if something is currently selected
+        const selected = _selectionManager?.getSelected();
+        if (selected) {
+            _attachGizmo(selected.object);
+        }
+    }
 }

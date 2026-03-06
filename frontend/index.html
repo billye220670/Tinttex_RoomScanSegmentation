@@ -15,6 +15,9 @@
                 <div class="spinner"></div>
                 <p id="loading-text">Processing...</p>
             </div>
+            <div id="drop-overlay" class="drop-overlay hidden">
+                Drop GLB / GLTF here
+            </div>
         </div>
 
         <!-- Right: Control Panel -->
@@ -200,6 +203,20 @@
                     </div>
                 </div>
 
+                <div class="selection-panel">
+                    <h3>Selection</h3>
+                    <div id="selection-info" class="selection-info">No selection</div>
+
+                    <div class="gizmo-panel">
+                        <h4>Transform Gizmo (Q/W/E/R)</h4>
+                        <div class="gizmo-mode-row">
+                            <button id="gizmo-select" class="gizmo-btn" data-mode="select" title="Q - Select mode (no gizmo)">Q: Select</button>
+                            <button id="gizmo-translate" class="gizmo-btn active" data-mode="translate" title="W - Move objects">W: Move</button>
+                            <button id="gizmo-rotate" class="gizmo-btn" data-mode="rotate" title="E - Rotate objects">E: Rotate</button>
+                            <button id="gizmo-scale" class="gizmo-btn" data-mode="scale" title="R - Scale objects">R: Scale</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

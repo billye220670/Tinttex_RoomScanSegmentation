@@ -1,5 +1,5 @@
-import { initScene, loadOriginalModel, hideOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode, setMarkerShape, setAlignToNormal } from './scene.js';
-import { initUI, showLoading, hideLoading, setButtonEnabled, showDownloadButton, updateStats, showError, setFOVSliderValue } from './ui.js';
+import { initScene, loadOriginalModel, hideOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode, setMarkerShape, setAlignToNormal, initDragDrop, initSelectionSystem, setGizmoMode } from './scene.js';
+import { initUI, showLoading, hideLoading, setButtonEnabled, showDownloadButton, updateStats, showError, setFOVSliderValue, updateSelectionInfo } from './ui.js';
 
 // Initialize application
 async function init() {
@@ -34,7 +34,14 @@ async function init() {
         onPreviewOpacityChange: setPreviewOpacity,
         onDisplayModeChange: setDisplayMode,
         onMarkerShapeChange: setMarkerShape,
-        onAlignToNormalChange: setAlignToNormal
+        onAlignToNormalChange: setAlignToNormal,
+        onGizmoModeChange: setGizmoMode
+    });
+
+    // Initialize drag-drop and selection system
+    initDragDrop();
+    initSelectionSystem((selInfo) => {
+        updateSelectionInfo(selInfo);
     });
 }
 

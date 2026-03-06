@@ -492,6 +492,103 @@ button {
     background: #2a2a2a;
 }
 
+/* Selection Panel */
+.selection-panel {
+    margin-top: clamp(9px, 1.3vmin, 16px);
+    padding: clamp(9px, 1.3vmin, 16px);
+    background: #1a1a1a;
+    border-radius: 8px;
+}
+
+.selection-panel h3 {
+    margin-bottom: clamp(8px, 1.1vmin, 12px);
+}
+
+.selection-type-row {
+    display: flex;
+    align-items: center;
+    gap: clamp(6px, 0.9vmin, 10px);
+    margin-bottom: clamp(8px, 1.1vmin, 12px);
+}
+
+.sl-label {
+    font-size: clamp(10px, 1.05vmin, 12px);
+    color: #888;
+    flex: 1;
+}
+
+.selection-info {
+    font-size: clamp(9px, 0.95vmin, 11px);
+    color: #aaa;
+    min-height: clamp(18px, 2.2vmin, 24px);
+    line-height: 1.4;
+}
+
+.gizmo-panel {
+    margin-top: clamp(8px, 1.1vmin, 12px);
+    padding-top: clamp(8px, 1.1vmin, 12px);
+    border-top: 1px solid #333;
+}
+
+.gizmo-panel h4 {
+    font-size: clamp(10px, 1.05vmin, 12px);
+    margin-bottom: clamp(6px, 0.8vmin, 8px);
+    color: #aaa;
+    font-weight: 500;
+}
+
+.gizmo-mode-row {
+    display: flex;
+    gap: clamp(4px, 0.5vmin, 6px);
+}
+
+.gizmo-btn {
+    flex: 1;
+    padding: clamp(4px, 0.5vmin, 6px) clamp(6px, 0.8vmin, 10px);
+    background: #2a2a2a;
+    color: #aaa;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-size: clamp(9px, 0.95vmin, 11px);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+
+.gizmo-btn:hover {
+    background: #333;
+    color: #ccc;
+    border-color: #555;
+}
+
+.gizmo-btn.active {
+    background: #2196F3;
+    color: white;
+    border-color: #2196F3;
+}
+
+/* Drop Overlay */
+.drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(33, 150, 243, 0.18);
+    border: 2px dashed #2196F3;
+    border-radius: 4px;
+    font-size: clamp(14px, 1.5vmin, 20px);
+    color: #2196F3;
+    pointer-events: none;
+    font-weight: 500;
+    text-align: center;
+}
+
+.drop-overlay.hidden {
+    display: none;
+}
+
 /* ===== Responsive ===== */
 
 /* Short viewport: shrink preview so panel isn't too wide */

@@ -87,6 +87,16 @@ export function initUI(callbacks) {
         if (callbacks.onAlignToNormalChange) callbacks.onAlignToNormalChange(e.target.checked);
     });
 
+    // Gizmo mode buttons
+    document.querySelectorAll('.gizmo-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.gizmo-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const mode = btn.dataset.mode;
+            if (callbacks.onGizmoModeChange) callbacks.onGizmoModeChange(mode);
+        });
+    });
+
     // Get current parameters
     const getParams = () => ({
         voxel_size: parseFloat(voxelSlider.value),
@@ -193,4 +203,9 @@ export function setFOVSliderValue(fov) {
     const clamped = Math.round(Math.max(30, Math.min(120, fov)));
     document.getElementById('fov-slider').value = clamped;
     document.getElementById('fov-value').textContent = clamped;
+}
+
+export function updateSelectionInfo(text) {
+    const el = document.getElementById('selection-info');
+    if (el) el.textContent = text ?? 'No selection';
 }
