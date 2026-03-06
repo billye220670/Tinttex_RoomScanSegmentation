@@ -1,4 +1,4 @@
-import { initScene, loadOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode } from './scene.js';
+import { initScene, loadOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode, setMarkerShape, setAlignToNormal } from './scene.js';
 import { initUI, showLoading, hideLoading, setButtonEnabled, showDownloadButton, updateStats, showError, setFOVSliderValue } from './ui.js';
 
 // Initialize application
@@ -32,7 +32,9 @@ async function init() {
         onStep6: runStep6,
         onFOVChange: updateCameraFOV,
         onPreviewOpacityChange: setPreviewOpacity,
-        onDisplayModeChange: setDisplayMode
+        onDisplayModeChange: setDisplayMode,
+        onMarkerShapeChange: setMarkerShape,
+        onAlignToNormalChange: setAlignToNormal
     });
 }
 

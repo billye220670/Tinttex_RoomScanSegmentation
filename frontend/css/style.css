@@ -173,6 +173,21 @@ body {
     border: none;
 }
 
+.preview-control-row .checkbox-label {
+    min-width: unset;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.preview-control-row .checkbox-label input[type="checkbox"] {
+    accent-color: #2196F3;
+    width: 13px;
+    height: 13px;
+    cursor: pointer;
+}
+
 /* Params Section - scrollable */
 .params-section {
     flex: 1;

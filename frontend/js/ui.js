@@ -26,6 +26,8 @@ export function initUI(callbacks) {
     const wallDisplaySelect = document.getElementById('wall-display-mode');
     const ceilingDisplaySelect = document.getElementById('ceiling-display-mode');
     const floorDisplaySelect = document.getElementById('floor-display-mode');
+    const markerShapeSelect = document.getElementById('marker-shape');
+    const alignToNormalCheckbox = document.getElementById('align-to-normal');
 
     // Slider value updates
     voxelSlider.addEventListener('input', (e) => {
@@ -75,6 +77,14 @@ export function initUI(callbacks) {
 
     floorDisplaySelect.addEventListener('change', (e) => {
         if (callbacks.onDisplayModeChange) callbacks.onDisplayModeChange('floor', e.target.value);
+    });
+
+    markerShapeSelect.addEventListener('change', (e) => {
+        if (callbacks.onMarkerShapeChange) callbacks.onMarkerShapeChange(e.target.value);
+    });
+
+    alignToNormalCheckbox.addEventListener('change', (e) => {
+        if (callbacks.onAlignToNormalChange) callbacks.onAlignToNormalChange(e.target.checked);
     });
 
     // Get current parameters

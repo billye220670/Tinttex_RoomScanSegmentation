@@ -7,6 +7,8 @@ let originalModel = null;
 let lowPolyGroup = null;
 let currentLowPolyData = null;
 let markerSphere = null;
+let markerShape = 'point';
+let alignToNormal = false;
 
 // Camera preview viewport
 let fixedCamera, previewRenderer;
@@ -77,25 +79,93 @@ function animate() {
 }
 
 function createMarker() {
-    const innerGeo = new THREE.SphereGeometry(0.04, 16, 16);
-    const innerMat = new THREE.MeshBasicMaterial({ color: 0xffee00 });
-    markerSphere = new THREE.Mesh(innerGeo, innerMat);
-    markerSphere.layers.set(1);
+    markerSphere = new THREE.Object3D();
     markerSphere.visible = false;
+    scene.add(markerSphere);
+    rebuildMarkerGeometry();
+}
 
-    const outerGeo = new THREE.SphereGeometry(0.10, 16, 16);
-    const outerMat = new THREE.MeshBasicMaterial({
-        color: 0xffee00, transparent: true, opacity: 0.25, side: THREE.BackSide
-    });
-    const glowMesh = new THREE.Mesh(outerGeo, outerMat);
-    glowMesh.layers.set(1);
-    markerSphere.add(glowMesh);
+function rebuildMarkerGeometry() {
+    // Dispose and remove all existing children
+    while (markerSphere.children.length > 0) {
+        const child = markerSphere.children[0];
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+        markerSphere.remove(child);
+    }
 
-    const pt = new THREE.PointLight(0xffee00, 1.5, 2.0);
+    const color = 0xffee00;
+
+    if (markerShape === 'point') {
+        const inner = new THREE.Mesh(
+            new THREE.SphereGeometry(0.04, 16, 16),
+            new THREE.MeshBasicMaterial({ color })
+        );
+        inner.layers.set(1);
+        markerSphere.add(inner);
+
+        const glow = new THREE.Mesh(
+            new THREE.SphereGeometry(0.10, 16, 16),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, side: THREE.BackSide })
+        );
+        glow.layers.set(1);
+        markerSphere.add(glow);
+
+    } else if (markerShape === 'cone') {
+        const h = 0.20, r = 0.04;
+        const cone = new THREE.Mesh(
+            new THREE.ConeGeometry(r, h, 16),
+            new THREE.MeshBasicMaterial({ color })
+        );
+        cone.position.y = h / 2; // base at origin, tip points +Y
+        cone.layers.set(1);
+        markerSphere.add(cone);
+
+        const glow = new THREE.Mesh(
+            new THREE.SphereGeometry(0.06, 12, 12),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.20, side: THREE.BackSide })
+        );
+        glow.layers.set(1);
+        markerSphere.add(glow);
+
+    } else if (markerShape === 'square') {
+        const size = 0.20;
+        const square = new THREE.Mesh(
+            new THREE.PlaneGeometry(size, size),
+            new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
+        );
+        square.rotation.x = -Math.PI / 2; // flat horizontal by default; normal faces +Y
+        square.layers.set(1);
+        markerSphere.add(square);
+
+        const edges = new THREE.LineSegments(
+            new THREE.EdgesGeometry(new THREE.PlaneGeometry(size, size)),
+            new THREE.LineBasicMaterial({ color: 0xffffff })
+        );
+        edges.rotation.x = -Math.PI / 2;
+        edges.layers.set(1);
+        markerSphere.add(edges);
+
+    } else if (markerShape === 'sphere') {
+        const ball = new THREE.Mesh(
+            new THREE.SphereGeometry(0.08, 16, 16),
+            new THREE.MeshBasicMaterial({ color })
+        );
+        ball.layers.set(1);
+        markerSphere.add(ball);
+
+        const glow = new THREE.Mesh(
+            new THREE.SphereGeometry(0.16, 16, 16),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.20, side: THREE.BackSide })
+        );
+        glow.layers.set(1);
+        markerSphere.add(glow);
+    }
+
+    // Point light for all shapes
+    const pt = new THREE.PointLight(color, 1.5, 2.0);
     pt.layers.set(1);
     markerSphere.add(pt);
-
-    scene.add(markerSphere);
 }
 
 function onWindowResize() {
@@ -122,6 +192,16 @@ export function setPreviewOpacity(opacity) {
 export function setDisplayMode(label, mode) {
     displayModes[label] = mode;
     applyDisplayModes();
+}
+
+export function setMarkerShape(shape) {
+    markerShape = shape;
+    if (markerSphere) rebuildMarkerGeometry();
+}
+
+export function setAlignToNormal(enabled) {
+    alignToNormal = enabled;
+    if (!enabled && markerSphere) markerSphere.quaternion.identity();
 }
 
 function createGridTexture(label) {
@@ -467,6 +547,17 @@ function onPreviewMouseMove(event) {
     const hits = raycaster.intersectObjects(meshes, false);
     if (hits.length > 0) {
         markerSphere.position.copy(hits[0].point);
+
+        if (alignToNormal && hits[0].face) {
+            const worldNormal = hits[0].face.normal.clone()
+                .transformDirection(hits[0].object.matrixWorld);
+            markerSphere.quaternion.setFromUnitVectors(
+                new THREE.Vector3(0, 1, 0), worldNormal
+            );
+        } else {
+            markerSphere.quaternion.identity();
+        }
+
         markerSphere.visible = true;
     } else {
         markerSphere.visible = false;
