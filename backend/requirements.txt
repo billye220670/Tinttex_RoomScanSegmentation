@@ -4,5 +4,6 @@ open3d==0.18.0
 numpy==1.24.3
 scipy==1.11.4
 trimesh==4.0.8
+shapely==2.0.3
 python-multipart==0.0.6
 aiofiles==23.2.1

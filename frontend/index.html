@@ -73,6 +73,22 @@
                 <small>Minimum points in wall cluster</small>
             </div>
 
+            <div class="control-group">
+                <label for="expand-margin">
+                    Expand Margin: <span id="expand-margin-value">0.30</span>m
+                </label>
+                <input type="range" id="expand-margin" min="0.0" max="3.0" step="0.1" value="0.30">
+                <small>Plane expansion distance (Phase 1)</small>
+            </div>
+
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="enable-trimming">
+                    Enable Intelligent Trimming (Phase 2)
+                </label>
+                <small>Trim walls at floor/ceiling intersections</small>
+            </div>
+
             <button id="run-extraction" class="btn-primary">Run Full Extraction</button>
 
             <div class="step-controls">
@@ -81,6 +97,7 @@
                 <button id="step2-btn" class="btn-step">Step 2: Extract Planes</button>
                 <button id="step3-btn" class="btn-step">Step 3: Classify</button>
                 <button id="step4-btn" class="btn-step">Step 4: Generate Mesh</button>
+                <button id="step5-btn" class="btn-step">Step 5: Trim Mesh</button>
             </div>
 
             <button id="download-lowpoly" class="btn-secondary hidden">Download Low-Poly</button>

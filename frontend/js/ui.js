@@ -9,6 +9,9 @@ export function initUI(callbacks) {
     const clusterValue = document.getElementById('cluster-value');
     const minClusterSlider = document.getElementById('min-cluster-size');
     const minClusterValue = document.getElementById('min-cluster-value');
+    const expandMarginSlider = document.getElementById('expand-margin');
+    const expandMarginValue = document.getElementById('expand-margin-value');
+    const enableTrimmingCheckbox = document.getElementById('enable-trimming');
     const fovSlider = document.getElementById('fov-slider');
     const fovValue = document.getElementById('fov-value');
     const runButton = document.getElementById('run-extraction');
@@ -17,6 +20,7 @@ export function initUI(callbacks) {
     const step2Button = document.getElementById('step2-btn');
     const step3Button = document.getElementById('step3-btn');
     const step4Button = document.getElementById('step4-btn');
+    const step5Button = document.getElementById('step5-btn');
 
     // Update slider values
     voxelSlider.addEventListener('input', (e) => {
@@ -39,6 +43,10 @@ export function initUI(callbacks) {
         minClusterValue.textContent = e.target.value;
     });
 
+    expandMarginSlider.addEventListener('input', (e) => {
+        expandMarginValue.textContent = parseFloat(e.target.value).toFixed(2);
+    });
+
     fovSlider.addEventListener('input', (e) => {
         const fov = parseInt(e.target.value);
         fovValue.textContent = fov;
@@ -53,7 +61,9 @@ export function initUI(callbacks) {
         distance_threshold: parseFloat(distanceSlider.value),
         angle_tolerance: parseFloat(angleSlider.value),
         cluster_radius: parseFloat(clusterSlider.value),
-        min_cluster_size: parseInt(minClusterSlider.value)
+        min_cluster_size: parseInt(minClusterSlider.value),
+        expand_margin: parseFloat(expandMarginSlider.value),
+        enable_trimming: enableTrimmingCheckbox.checked
     });
 
     // Run extraction
@@ -76,6 +86,10 @@ export function initUI(callbacks) {
 
     step4Button.addEventListener('click', () => {
         callbacks.onStep4(getParams());
+    });
+
+    step5Button.addEventListener('click', () => {
+        callbacks.onStep5(getParams());
     });
 
     // Download low-poly
@@ -102,6 +116,7 @@ export function setButtonEnabled(enabled) {
     const step2Button = document.getElementById('step2-btn');
     const step3Button = document.getElementById('step3-btn');
     const step4Button = document.getElementById('step4-btn');
+    const step5Button = document.getElementById('step5-btn');
 
     runButton.disabled = !enabled;
     step1Button.disabled = !enabled;

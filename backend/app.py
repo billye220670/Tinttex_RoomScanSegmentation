@@ -32,6 +32,8 @@ class ExtractionRequest(BaseModel):
     angle_tolerance: float = 5.0
     cluster_radius: float = 0.1
     min_cluster_size: int = 500
+    expand_margin: float = 0.3
+    enable_trimming: bool = False
 
 
 @app.get("/")
@@ -100,10 +102,25 @@ async def extract_planes(request: ExtractionRequest):
         print("Generating low-poly meshes...")
         meshes_by_label = {}
 
+        # Extract floor and ceiling planes for trimming
+        floor_plane = classified['floor'][0][0] if classified.get('floor') else None
+        ceiling_plane = classified['ceiling'][0][0] if classified.get('ceiling') else None
+        wall_planes = classified.get('wall', [])  # list of (plane_model, points)
+
         for label in ['floor', 'ceiling', 'wall']:
             meshes_by_label[label] = []
             for plane_model, points in classified.get(label, []):
-                mesh = generate_low_poly_mesh(plane_model, points, alpha=1.0)
+                mesh = generate_low_poly_mesh(
+                    plane_model,
+                    points,
+                    alpha=1.0,
+                    expand_margin=request.expand_margin,
+                    semantic_label=label,
+                    floor_plane=floor_plane,
+                    ceiling_plane=ceiling_plane,
+                    wall_planes=wall_planes,
+                    enable_trimming=request.enable_trimming
+                )
                 if mesh is not None:
                     meshes_by_label[label].append(mesh)
 
@@ -355,7 +372,14 @@ async def step4_generate_mesh(request: ExtractionRequest):
         for label in ['floor', 'ceiling', 'wall']:
             meshes_by_label[label] = []
             for plane_model, points in classified.get(label, []):
-                mesh = generate_low_poly_mesh(plane_model, points, alpha=1.0)
+                mesh = generate_low_poly_mesh(
+                    plane_model,
+                    points,
+                    alpha=1.0,
+                    expand_margin=request.expand_margin,
+                    semantic_label=label,
+                    enable_trimming=False  # Step 4: No trimming
+                )
                 if mesh is not None:
                     meshes_by_label[label].append(mesh)
 
@@ -373,6 +397,69 @@ async def step4_generate_mesh(request: ExtractionRequest):
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Step 4 failed: {str(e)}")
+
+
+@app.post("/api/step5-trim-mesh")
+async def step5_trim_mesh(request: ExtractionRequest):
+    """Step 5: Apply intelligent trimming to meshes"""
+    global _cached_pcd
+    try:
+        # Use cached point cloud if available
+        if _cached_pcd is None:
+            if not GLB_FILE.exists():
+                raise HTTPException(status_code=404, detail="TestScene.glb not found")
+            pcd = load_glb_to_pointcloud(str(GLB_FILE))
+            pcd = voxel_downsample(pcd, request.voxel_size)
+            pcd = estimate_normals(pcd)
+            _cached_pcd = pcd
+        else:
+            pcd = _cached_pcd
+
+        planes = extract_planes_sequential(pcd, request.distance_threshold)
+        classified = classify_planes(
+            planes,
+            request.angle_tolerance,
+            cluster_radius=request.cluster_radius,
+            min_cluster_size=request.min_cluster_size
+        )
+
+        # Extract floor, ceiling, and wall planes for trimming
+        floor_plane = classified['floor'][0][0] if classified.get('floor') else None
+        ceiling_plane = classified['ceiling'][0][0] if classified.get('ceiling') else None
+        wall_planes = classified.get('wall', [])
+
+        meshes_by_label = {}
+        for label in ['floor', 'ceiling', 'wall']:
+            meshes_by_label[label] = []
+            for plane_model, points in classified.get(label, []):
+                mesh = generate_low_poly_mesh(
+                    plane_model,
+                    points,
+                    alpha=1.0,
+                    expand_margin=request.expand_margin,
+                    semantic_label=label,
+                    floor_plane=floor_plane,
+                    ceiling_plane=ceiling_plane,
+                    wall_planes=wall_planes,
+                    enable_trimming=True  # Step 5: Always trim
+                )
+                if mesh is not None:
+                    meshes_by_label[label].append(mesh)
+
+        glb_bytes = export_to_glb(meshes_by_label)
+        if glb_bytes is None:
+            raise HTTPException(status_code=500, detail="Failed to generate trimmed mesh GLB")
+
+        return JSONResponse({
+            'glb_data': base64.b64encode(glb_bytes).decode('utf-8'),
+            'stats': {
+                'floor_count': len(meshes_by_label.get('floor', [])),
+                'ceiling_count': len(meshes_by_label.get('ceiling', [])),
+                'wall_count': len(meshes_by_label.get('wall', []))
+            }
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Step 5 failed: {str(e)}")
 
 
 # Mount static files (CSS, JS)

@@ -28,6 +28,7 @@ async function init() {
         onStep2: runStep2,
         onStep3: runStep3,
         onStep4: runStep4,
+        onStep5: runStep5,
         onFOVChange: updateCameraFOV
     });
 }
@@ -143,6 +144,37 @@ async function runStep4(params) {
         await addLowPolyOverlay(result.glb_data);
 
         updateStats({ ...result.stats, step: 'Step 4: Mesh Generated' });
+        showDownloadButton();
+        hideLoading();
+    } catch (error) {
+        hideLoading();
+        showError(error.message);
+    } finally {
+        setButtonEnabled(true);
+    }
+}
+
+async function runStep5(params) {
+    setButtonEnabled(false);
+    showLoading('Step 5: Trimming meshes...');
+
+    try {
+        const response = await fetch('/api/step5-trim-mesh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Step 5 failed');
+        }
+
+        const result = await response.json();
+        showLoading('Rendering trimmed meshes...');
+        await addLowPolyOverlay(result.glb_data);
+
+        updateStats({ ...result.stats, step: 'Step 5: Mesh Trimmed' });
         showDownloadButton();
         hideLoading();
     } catch (error) {
