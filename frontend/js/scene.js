@@ -33,7 +33,11 @@ let _justFinishedDragging = false; // Prevent click after dragging from deselect
 let _previewDraggingModel = null;
 let _lastSelectionSource = 'main'; // Track selection source: 'main' or 'preview'
 
-// Display mode state per label: 'solid' | 'checker' | 'grid'
+// Main viewport drag detection (to prevent click selection after camera drag)
+let _mainViewportMouseDownPos = null;
+let _mainViewportWasDragged = false;
+
+// Display mode state per label: 'solid' | 'checker' | 'grid' | 'none'
 const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
 const checkerTextures = {};
 const gridTextures = {};
@@ -437,7 +441,15 @@ function applyDisplayModes() {
         const mode = displayModes[label];
         const color = SEMANTIC_COLORS[label];
 
-        if (mode === 'solid') {
+        if (mode === 'none') {
+            // Invisible but still in scene, selectable, and participates in raycast
+            child.material = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0,
+                side: THREE.DoubleSide
+            });
+        } else if (mode === 'solid') {
             child.material = new THREE.MeshLambertMaterial({
                 color,
                 side: THREE.DoubleSide,
@@ -740,10 +752,32 @@ export function initSelectionSystem(onSelectionChange) {
         onSelectionChange(selInfo);
     });
 
+    // Detect viewport dragging to prevent accidental selection after camera rotation
+    renderer.domElement.addEventListener('mousedown', (event) => {
+        if (event.button === 0) { // Left mouse button
+            _mainViewportMouseDownPos = { x: event.clientX, y: event.clientY };
+            _mainViewportWasDragged = false;
+        }
+    });
+
+    renderer.domElement.addEventListener('mousemove', (event) => {
+        if (_mainViewportMouseDownPos && event.buttons === 1) { // Left button still pressed
+            const dx = event.clientX - _mainViewportMouseDownPos.x;
+            const dy = event.clientY - _mainViewportMouseDownPos.y;
+            const dragDistance = Math.sqrt(dx * dx + dy * dy);
+
+            // If moved more than 5 pixels, consider it a drag
+            if (dragDistance > 5) {
+                _mainViewportWasDragged = true;
+            }
+        }
+    });
+
     // Click listener on main viewport
     renderer.domElement.addEventListener('click', (event) => {
         // Ignore click right after dragging to preserve selection state
-        if (_justFinishedDragging) {
+        if (_justFinishedDragging || _mainViewportWasDragged) {
+            _mainViewportWasDragged = false;
             return;
         }
 
