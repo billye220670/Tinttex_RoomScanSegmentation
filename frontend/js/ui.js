@@ -87,6 +87,28 @@ export function initUI(callbacks) {
         if (callbacks.onAlignToNormalChange) callbacks.onAlignToNormalChange(e.target.checked);
     });
 
+    // Light control sliders
+    const lightXSlider = document.getElementById('light-x');
+    const lightYSlider = document.getElementById('light-y');
+    const lightZSlider = document.getElementById('light-z');
+    const lightXValue = document.getElementById('light-x-value');
+    const lightYValue = document.getElementById('light-y-value');
+    const lightZValue = document.getElementById('light-z-value');
+
+    const updateLightPosition = () => {
+        const x = parseInt(lightXSlider.value);
+        const y = parseInt(lightYSlider.value);
+        const z = parseInt(lightZSlider.value);
+        lightXValue.textContent = x;
+        lightYValue.textContent = y;
+        lightZValue.textContent = z;
+        if (callbacks.onLightDirectionChange) callbacks.onLightDirectionChange(x, y, z);
+    };
+
+    lightXSlider.addEventListener('input', updateLightPosition);
+    lightYSlider.addEventListener('input', updateLightPosition);
+    lightZSlider.addEventListener('input', updateLightPosition);
+
     // Gizmo mode buttons
     document.querySelectorAll('.gizmo-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {

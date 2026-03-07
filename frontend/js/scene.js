@@ -42,15 +42,18 @@ const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
 const checkerTextures = {};
 const gridTextures = {};
 
+// Light reference
+let directionalLight = null;
+
 const CHECKER_COLORS = {
     wall:    ['#3a7abf', '#c8e0ff'],
-    ceiling: ['#bf3a3a', '#ffc8c8'],
-    floor:   ['#3a9e3a', '#c8f0c8'],
+    ceiling: ['#3a9e3a', '#c8f0c8'],  // Swapped: was floor (green)
+    floor:   ['#bf3a3a', '#ffc8c8'],  // Swapped: was ceiling (red)
 };
 
 const SEMANTIC_COLORS = {
-    floor: 0x4CAF50,
-    ceiling: 0xF44336,
+    floor: 0xF44336,   // Swapped: red (was ceiling color)
+    ceiling: 0x4CAF50, // Swapped: green (was floor color)
     wall: 0x2196F3
 };
 
@@ -72,6 +75,8 @@ export function initScene() {
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.sortObjects = true; // Ensure renderOrder is respected
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
 
     controls = new OrbitControls(camera, renderer.domElement);
@@ -137,8 +142,18 @@ export function initScene() {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
     directionalLight.position.set(10, 10, 10);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.set(4096, 4096);
+    directionalLight.shadow.camera.near = 0.1;
+    directionalLight.shadow.camera.far = 100;
+    directionalLight.shadow.camera.left = -25;
+    directionalLight.shadow.camera.right = 25;
+    directionalLight.shadow.camera.top = 25;
+    directionalLight.shadow.camera.bottom = -25;
+    directionalLight.shadow.bias = -0.0005;
+    directionalLight.shadow.normalBias = 0.01;
     scene.add(directionalLight);
 
     const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
@@ -360,16 +375,16 @@ function createCheckerTexture(label) {
 function getLabelFromMesh(child) {
     // Try by node/mesh name first
     const name = child.name || '';
-    if (/^floor/i.test(name)) return 'floor';
-    if (/^ceiling/i.test(name)) return 'ceiling';
+    if (/^floor/i.test(name)) return 'ceiling';  // Swapped: backend floor -> frontend ceiling
+    if (/^ceiling/i.test(name)) return 'floor';  // Swapped: backend ceiling -> frontend floor
     if (/^wall/i.test(name)) return 'wall';
 
-    // Fallback: detect by vertex color
+    // Fallback: detect by vertex color (swapped for consistency)
     const colors = child.geometry && child.geometry.attributes.color;
     if (colors && colors.count > 0) {
         const r = colors.getX(0), g = colors.getY(0), b = colors.getZ(0);
-        if (g > 0.6 && r < 0.5 && b < 0.5) return 'floor';
-        if (r > 0.7 && g < 0.4) return 'ceiling';
+        if (g > 0.6 && r < 0.5 && b < 0.5) return 'ceiling';  // Swapped: green -> ceiling
+        if (r > 0.7 && g < 0.4) return 'floor';  // Swapped: red -> floor
         if (b > 0.7 && r < 0.3) return 'wall';
     }
     return null;
@@ -441,7 +456,19 @@ function applyDisplayModes() {
         const mode = displayModes[label];
         const color = SEMANTIC_COLORS[label];
 
-        if (mode === 'none') {
+        // Reset receiveShadow for all modes
+        child.receiveShadow = false;
+        child.castShadow = false;
+
+        if (mode === 'shadowcatcher') {
+            // Shadow catcher: invisible but receives and displays shadows
+            child.material = new THREE.ShadowMaterial({
+                opacity: 0.75,
+                side: THREE.DoubleSide
+            });
+            child.receiveShadow = true;
+            child.castShadow = false;  // Important: shadowcatcher should NOT cast shadow on itself
+        } else if (mode === 'none') {
             // Invisible but still in scene, selectable, and participates in raycast
             child.material = new THREE.MeshBasicMaterial({
                 color: 0xffffff,
@@ -550,6 +577,15 @@ export function addLowPolyOverlay(base64glb) {
             (gltf) => {
                 lowPolyGroup = gltf.scene;
                 scene.add(lowPolyGroup);
+
+                // Ensure all meshes are set up for shadow receiving
+                lowPolyGroup.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = false;  // lowPoly meshes don't cast shadows
+                        child.receiveShadow = true;  // but they receive shadows
+                    }
+                });
+
                 // Apply current display modes to newly loaded meshes
                 applyDisplayModes();
                 resolve();
@@ -602,6 +638,8 @@ export function initCameraPreview() {
     previewRenderer.setClearColor(0x000000, 0);
     previewRenderer.setSize(container.clientWidth, container.clientHeight, false);
     previewRenderer.setPixelRatio(window.devicePixelRatio);
+    previewRenderer.shadowMap.enabled = true;
+    previewRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(previewRenderer.domElement);
 
     previewRenderer.domElement.style.cursor = 'crosshair';
@@ -718,6 +756,10 @@ export function initDragDrop() {
             const model = gltf.scene;
             model.scale.multiplyScalar(0.01); // Default scale to 1% of original
             model.position.copy(worldPos);
+            // Enable shadow casting for the model
+            model.traverse((child) => {
+                if (child.isMesh) child.castShadow = true;
+            });
             scene.add(model);
             droppedModels.push(model);
 
@@ -1146,5 +1188,14 @@ export function applyScaleFactor(factor) {
     // Trigger render
     renderer.render(scene, camera);
     console.log(`Set object scale to ${factor}. New scale: [${obj.scale.x.toFixed(3)}, ${obj.scale.y.toFixed(3)}, ${obj.scale.z.toFixed(3)}]`);
+}
+
+export function updateLightDirection(x, y, z) {
+    if (directionalLight) {
+        directionalLight.position.set(x, y, z);
+        // Update shadow camera projection matrix when light direction changes
+        directionalLight.shadow.camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+    }
 }
 

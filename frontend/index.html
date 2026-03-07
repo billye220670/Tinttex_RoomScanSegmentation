@@ -18,6 +18,21 @@
             <div id="drop-overlay" class="drop-overlay hidden">
                 Drop GLB / GLTF here
             </div>
+            <div id="light-control-panel" class="light-control-panel">
+                <h4>Light Direction</h4>
+                <div class="light-control-group">
+                    <label>X: <span id="light-x-value">10</span></label>
+                    <input type="range" id="light-x" min="-30" max="30" step="1" value="10">
+                </div>
+                <div class="light-control-group">
+                    <label>Y: <span id="light-y-value">10</span></label>
+                    <input type="range" id="light-y" min="-30" max="30" step="1" value="10">
+                </div>
+                <div class="light-control-group">
+                    <label>Z: <span id="light-z-value">10</span></label>
+                    <input type="range" id="light-z" min="-30" max="30" step="1" value="10">
+                </div>
+            </div>
         </div>
 
         <!-- Right: Control Panel -->
@@ -181,26 +196,29 @@
                             <option value="solid">Solid Color</option>
                             <option value="checker">UV Checker</option>
                             <option value="grid">Grid</option>
-                            <option value="none">None (Hidden)</option>
-                        </select>
-                    </div>
-                    <div class="display-mode-item">
-                        <span class="dm-dot" style="background:#F44336"></span>
-                        <span class="dm-label">Ceiling</span>
-                        <select id="ceiling-display-mode" class="dm-select">
-                            <option value="solid">Solid Color</option>
-                            <option value="checker">UV Checker</option>
-                            <option value="grid">Grid</option>
+                            <option value="shadowcatcher">Shadow Catcher</option>
                             <option value="none">None (Hidden)</option>
                         </select>
                     </div>
                     <div class="display-mode-item">
                         <span class="dm-dot" style="background:#4CAF50"></span>
+                        <span class="dm-label">Ceiling</span>
+                        <select id="ceiling-display-mode" class="dm-select">
+                            <option value="solid">Solid Color</option>
+                            <option value="checker">UV Checker</option>
+                            <option value="grid">Grid</option>
+                            <option value="shadowcatcher">Shadow Catcher</option>
+                            <option value="none">None (Hidden)</option>
+                        </select>
+                    </div>
+                    <div class="display-mode-item">
+                        <span class="dm-dot" style="background:#F44336"></span>
                         <span class="dm-label">Floor</span>
                         <select id="floor-display-mode" class="dm-select">
                             <option value="solid">Solid Color</option>
                             <option value="checker">UV Checker</option>
                             <option value="grid">Grid</option>
+                            <option value="shadowcatcher">Shadow Catcher</option>
                             <option value="none">None (Hidden)</option>
                         </select>
                     </div>
