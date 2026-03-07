@@ -704,6 +704,7 @@ export function initDragDrop() {
 
             // Load and position model
             const model = gltf.scene;
+            model.scale.multiplyScalar(0.01); // Default scale to 1% of original
             model.position.copy(worldPos);
             scene.add(model);
             droppedModels.push(model);
