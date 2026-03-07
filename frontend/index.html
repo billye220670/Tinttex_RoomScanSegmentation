@@ -19,7 +19,7 @@
                 Drop GLB / GLTF here
             </div>
             <div id="light-control-panel" class="light-control-panel">
-                <h4>Light Direction</h4>
+                <h4>Light</h4>
                 <div class="light-control-group">
                     <label>X: <span id="light-x-value">10</span></label>
                     <input type="range" id="light-x" min="-30" max="30" step="1" value="10">
@@ -31,6 +31,15 @@
                 <div class="light-control-group">
                     <label>Z: <span id="light-z-value">10</span></label>
                     <input type="range" id="light-z" min="-30" max="30" step="1" value="10">
+                </div>
+                <div class="light-control-group">
+                    <label>Int: <span id="light-intensity-value">1.5</span></label>
+                    <input type="range" id="light-intensity" min="0" max="5" step="0.1" value="1.5">
+                </div>
+                <div class="light-control-divider"></div>
+                <div class="light-control-toggle">
+                    <label for="grid-visible-toggle">Grid</label>
+                    <input type="checkbox" id="grid-visible-toggle" checked>
                 </div>
             </div>
         </div>
@@ -194,7 +203,7 @@
                         <span class="dm-label">Wall</span>
                         <select id="wall-display-mode" class="dm-select">
                             <option value="solid">Solid Color</option>
-                            <option value="checker">UV Checker</option>
+                            <option value="checker" selected>UV Checker</option>
                             <option value="grid">Grid</option>
                             <option value="shadowcatcher">Shadow Catcher</option>
                             <option value="none">None (Hidden)</option>
@@ -205,7 +214,7 @@
                         <span class="dm-label">Ceiling</span>
                         <select id="ceiling-display-mode" class="dm-select">
                             <option value="solid">Solid Color</option>
-                            <option value="checker">UV Checker</option>
+                            <option value="checker" selected>UV Checker</option>
                             <option value="grid">Grid</option>
                             <option value="shadowcatcher">Shadow Catcher</option>
                             <option value="none">None (Hidden)</option>
@@ -216,7 +225,7 @@
                         <span class="dm-label">Floor</span>
                         <select id="floor-display-mode" class="dm-select">
                             <option value="solid">Solid Color</option>
-                            <option value="checker">UV Checker</option>
+                            <option value="checker" selected>UV Checker</option>
                             <option value="grid">Grid</option>
                             <option value="shadowcatcher">Shadow Catcher</option>
                             <option value="none">None (Hidden)</option>

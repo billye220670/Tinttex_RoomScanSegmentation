@@ -38,12 +38,26 @@ let _mainViewportMouseDownPos = null;
 let _mainViewportWasDragged = false;
 
 // Display mode state per label: 'solid' | 'checker' | 'grid' | 'none'
-const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
+// NOTE: 默认设为 'checker' 而非 'solid'，是为了绕过一个 Three.js r160 的已知问题：
+// 当低模 mesh 材质首次以 MeshLambertMaterial 编译时（尚无任何投影源），
+// 之后拖入带 castShadow 的模型也不会自动出现投影，必须手动切换一次 display mode
+// 才能触发材质重新编译从而让阴影生效。
+// 根本原因未能定位（疑似 WebGLPrograms 程序缓存与 shadow uniform 绑定的时序问题），
+// 暂以 checker 作为默认值规避——checker 模式会生成 UV 并使用 MeshBasicMaterial，
+// 切回任意支持阴影的模式时 program hash 不同，强制重新编译，阴影即可正常显示。
+const displayModes = { wall: 'checker', ceiling: 'checker', floor: 'checker' };
 const checkerTextures = {};
 const gridTextures = {};
 
 // Light reference
 let directionalLight = null;
+
+// Grid helper reference
+let gridHelper = null;
+
+// Per-renderer shadow map cache (two renderers share the scene but have different GL contexts)
+let _mainShadowMap = null;
+let _previewShadowMap = null;
 
 const CHECKER_COLORS = {
     wall:    ['#3a7abf', '#c8e0ff'],
@@ -155,8 +169,9 @@ export function initScene() {
     directionalLight.shadow.bias = -0.0005;
     directionalLight.shadow.normalBias = 0.01;
     scene.add(directionalLight);
+    scene.add(directionalLight.target); // Required for shadow camera matrix to be computed correctly
 
-    const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+    gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
     scene.add(gridHelper);
 
     window.addEventListener('resize', onWindowResize);
@@ -373,18 +388,19 @@ function createCheckerTexture(label) {
 }
 
 function getLabelFromMesh(child) {
-    // Try by node/mesh name first
-    const name = child.name || '';
-    if (/^floor/i.test(name)) return 'ceiling';  // Swapped: backend floor -> frontend ceiling
-    if (/^ceiling/i.test(name)) return 'floor';  // Swapped: backend ceiling -> frontend floor
+    // GLTFLoader sometimes places the node name on the parent Object3D,
+    // leaving the child Mesh with an empty name. Check both.
+    const name = child.name || (child.parent && child.parent.name) || '';
+    if (/^floor/i.test(name)) return 'ceiling';
+    if (/^ceiling/i.test(name)) return 'floor';
     if (/^wall/i.test(name)) return 'wall';
 
-    // Fallback: detect by vertex color (swapped for consistency)
+    // Fallback: detect by vertex color
     const colors = child.geometry && child.geometry.attributes.color;
     if (colors && colors.count > 0) {
         const r = colors.getX(0), g = colors.getY(0), b = colors.getZ(0);
-        if (g > 0.6 && r < 0.5 && b < 0.5) return 'ceiling';  // Swapped: green -> ceiling
-        if (r > 0.7 && g < 0.4) return 'floor';  // Swapped: red -> floor
+        if (g > 0.6 && r < 0.5 && b < 0.5) return 'ceiling';
+        if (r > 0.7 && g < 0.4) return 'floor';
         if (b > 0.7 && r < 0.3) return 'wall';
     }
     return null;
@@ -456,18 +472,13 @@ function applyDisplayModes() {
         const mode = displayModes[label];
         const color = SEMANTIC_COLORS[label];
 
-        // Reset receiveShadow for all modes
         child.receiveShadow = false;
         child.castShadow = false;
 
         if (mode === 'shadowcatcher') {
-            // Shadow catcher: invisible but receives and displays shadows
-            child.material = new THREE.ShadowMaterial({
-                opacity: 0.75,
-                side: THREE.DoubleSide
-            });
             child.receiveShadow = true;
-            child.castShadow = false;  // Important: shadowcatcher should NOT cast shadow on itself
+            child.material = new THREE.ShadowMaterial({ opacity: 0.6 });
+            child.material.needsUpdate = true;
         } else if (mode === 'none') {
             // Invisible but still in scene, selectable, and participates in raycast
             child.material = new THREE.MeshBasicMaterial({
@@ -477,12 +488,15 @@ function applyDisplayModes() {
                 side: THREE.DoubleSide
             });
         } else if (mode === 'solid') {
+            child.receiveShadow = true;
             child.material = new THREE.MeshLambertMaterial({
                 color,
                 side: THREE.DoubleSide,
                 flatShading: true
             });
+            child.material.needsUpdate = true;
         } else if (mode === 'checker') {
+            child.receiveShadow = true;
             if (!checkerTextures[label]) checkerTextures[label] = createCheckerTexture(label);
             if (!child.geometry.attributes.uv) {
                 generatePlanarUVs(child.geometry);
@@ -491,7 +505,9 @@ function applyDisplayModes() {
                 map: checkerTextures[label],
                 side: THREE.DoubleSide
             });
+            child.material.needsUpdate = true;
         } else if (mode === 'grid') {
+            child.receiveShadow = true;
             if (!gridTextures[label]) gridTextures[label] = createGridTexture(label);
             if (!child.geometry.attributes.uv) {
                 generatePlanarUVs(child.geometry);
@@ -501,8 +517,14 @@ function applyDisplayModes() {
                 transparent: true,
                 side: THREE.DoubleSide
             });
+            child.material.needsUpdate = true;
         }
     });
+
+    // Force shadow map recomputation whenever any mesh receives shadows
+    if (renderer) {
+        renderer.shadowMap.needsUpdate = true;
+    }
 }
 
 export function loadOriginalModel() {
@@ -578,15 +600,8 @@ export function addLowPolyOverlay(base64glb) {
                 lowPolyGroup = gltf.scene;
                 scene.add(lowPolyGroup);
 
-                // Ensure all meshes are set up for shadow receiving
-                lowPolyGroup.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = false;  // lowPoly meshes don't cast shadows
-                        child.receiveShadow = true;  // but they receive shadows
-                    }
-                });
-
                 // Apply current display modes to newly loaded meshes
+                // (applyDisplayModes handles receiveShadow/castShadow per mode)
                 applyDisplayModes();
                 resolve();
             },
@@ -696,14 +711,21 @@ function onPreviewMouseLeave() {
 function animatePreview() {
     requestAnimationFrame(animatePreview);
 
-    // Temporarily remove scene background for transparent rendering
+    // Swap to preview renderer's own shadow map so both renderers
+    // maintain independent WebGLRenderTarget in their own GL context.
+    _mainShadowMap = directionalLight.shadow.map;
+    directionalLight.shadow.map = _previewShadowMap;
+
     const originalBackground = scene.background;
     scene.background = null;
 
     previewRenderer.render(scene, fixedCamera);
 
-    // Restore original background
     scene.background = originalBackground;
+
+    // Save preview's shadow map and restore main renderer's
+    _previewShadowMap = directionalLight.shadow.map;
+    directionalLight.shadow.map = _mainShadowMap;
 }
 
 // ========== Drag-Drop and Selection System ==========
@@ -762,6 +784,37 @@ export function initDragDrop() {
             });
             scene.add(model);
             droppedModels.push(model);
+
+            // ── Shadow workaround（未彻底解决，暂时保留） ──────────────────
+            // 问题：拖入模型后低模 mesh 不立即显示投影，需手动来回切换 display mode。
+            // 已尝试：shadow map dispose+重建、MeshBasicMaterial 临时替换、
+            //         双帧 rAF、material.needsUpdate 等方案，均无效。
+            // 当前实际规避方式：将默认 displayMode 改为 'checker'（见模块顶部注释）。
+            // 以下代码为调试残留，逻辑上无害，暂不删除以备后续排查。
+            if (directionalLight.shadow.map) {
+                directionalLight.shadow.map.dispose();
+                directionalLight.shadow.map = null;
+            }
+            _mainShadowMap = null;
+            _previewShadowMap = null;
+
+            if (lowPolyGroup) {
+                lowPolyGroup.traverse(child => {
+                    if (!child.isMesh) return;
+                    const label = getLabelFromMesh(child);
+                    const color = label ? SEMANTIC_COLORS[label] : 0x888888;
+                    child.receiveShadow = false;
+                    child.material = new THREE.MeshBasicMaterial({
+                        color,
+                        side: THREE.DoubleSide
+                    });
+                });
+            }
+
+            requestAnimationFrame(() => {
+                applyDisplayModes();
+            });
+            // ── end shadow workaround ─────────────────────────────────────
 
             // Auto-switch to 'model' selection type when a model is dropped
             if (_selectionManager) {
@@ -1193,9 +1246,21 @@ export function applyScaleFactor(factor) {
 export function updateLightDirection(x, y, z) {
     if (directionalLight) {
         directionalLight.position.set(x, y, z);
-        // Update shadow camera projection matrix when light direction changes
+        directionalLight.target.updateMatrixWorld(); // Recompute shadow camera orientation
         directionalLight.shadow.camera.updateProjectionMatrix();
-        renderer.render(scene, camera);
+        renderer.shadowMap.needsUpdate = true;
+    }
+}
+
+export function updateLightIntensity(intensity) {
+    if (directionalLight) {
+        directionalLight.intensity = intensity;
+    }
+}
+
+export function setGridVisible(visible) {
+    if (gridHelper) {
+        gridHelper.visible = visible;
     }
 }
 

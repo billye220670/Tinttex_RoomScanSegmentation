@@ -678,6 +678,32 @@ button {
     border: none;
 }
 
+.light-control-divider {
+    border-top: 1px solid #333;
+    margin: 8px 0 6px;
+}
+
+.light-control-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.light-control-toggle label {
+    font-size: 11px;
+    color: #ccc;
+    font-weight: 500;
+    min-width: 50px;
+    cursor: pointer;
+}
+
+.light-control-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: #2196F3;
+    cursor: pointer;
+}
+
 /* ===== Responsive ===== */
 
 /* Short viewport: shrink preview so panel isn't too wide */

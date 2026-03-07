@@ -109,6 +109,21 @@ export function initUI(callbacks) {
     lightYSlider.addEventListener('input', updateLightPosition);
     lightZSlider.addEventListener('input', updateLightPosition);
 
+    // Light intensity slider
+    const lightIntensitySlider = document.getElementById('light-intensity');
+    const lightIntensityValue = document.getElementById('light-intensity-value');
+    lightIntensitySlider.addEventListener('input', () => {
+        const v = parseFloat(lightIntensitySlider.value);
+        lightIntensityValue.textContent = v.toFixed(1);
+        if (callbacks.onLightIntensityChange) callbacks.onLightIntensityChange(v);
+    });
+
+    // Grid visibility toggle
+    const gridToggle = document.getElementById('grid-visible-toggle');
+    gridToggle.addEventListener('change', () => {
+        if (callbacks.onGridVisibleChange) callbacks.onGridVisibleChange(gridToggle.checked);
+    });
+
     // Gizmo mode buttons
     document.querySelectorAll('.gizmo-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
