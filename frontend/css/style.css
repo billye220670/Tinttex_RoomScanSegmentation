@@ -567,6 +567,26 @@ button {
     border-color: #2196F3;
 }
 
+.scale-control-row {
+    display: flex;
+}
+
+.scale-input {
+    flex: 1;
+    padding: clamp(4px, 0.5vmin, 6px) clamp(6px, 0.8vmin, 10px);
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-size: clamp(9px, 0.95vmin, 11px);
+    text-align: center;
+}
+
+.scale-input:focus {
+    border-color: #2196F3;
+    outline: none;
+}
+
 /* Drop Overlay */
 .drop-overlay {
     position: absolute;

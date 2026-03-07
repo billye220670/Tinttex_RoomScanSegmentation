@@ -97,6 +97,33 @@ export function initUI(callbacks) {
         });
     });
 
+    // Scale input
+    const scaleInput = document.getElementById('scale-input');
+
+    if (scaleInput) {
+        scaleInput.addEventListener('change', (e) => {
+            let value = parseFloat(e.target.value);
+            if (isNaN(value)) value = 1;
+            value = Math.max(0, Math.min(10, value));
+            scaleInput.value = value.toFixed(2);
+            if (callbacks.onScaleChange) callbacks.onScaleChange(value);
+        });
+
+        scaleInput.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            let value = parseFloat(scaleInput.value) || 1;
+            const step = 0.01;
+            if (e.deltaY < 0) {
+                value += step;
+            } else {
+                value -= step;
+            }
+            value = Math.max(0, Math.min(10, value));
+            scaleInput.value = value.toFixed(2);
+            if (callbacks.onScaleChange) callbacks.onScaleChange(value);
+        }, { passive: false });
+    }
+
     // Get current parameters
     const getParams = () => ({
         voxel_size: parseFloat(voxelSlider.value),

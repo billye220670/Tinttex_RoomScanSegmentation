@@ -29,6 +29,10 @@ let transformMode = 'translate'; // 'translate'|'rotate'|'scale'|'select'
 let _lastScalePerAxis = { x: 1, y: 1, z: 1 }; // Track scale to prevent over-scaling
 let _justFinishedDragging = false; // Prevent click after dragging from deselecting
 
+// Preview viewport interaction state
+let _previewDraggingModel = null;
+let _lastSelectionSource = 'main'; // Track selection source: 'main' or 'preview'
+
 // Display mode state per label: 'solid' | 'checker' | 'grid'
 const displayModes = { wall: 'solid', ceiling: 'solid', floor: 'solid' };
 const checkerTextures = {};
@@ -74,18 +78,37 @@ export function initScene() {
     // Initialize Transform Gizmo
     transformControls = new TransformControls(camera, renderer.domElement);
     transformControls.addEventListener('change', () => {
-        // Constrain scale to prevent over-scaling and negative scale
+        // Apply sensitivity damping to scale (like mainstream 3D software)
         if (transformMode === 'scale' && transformControls.object) {
             const obj = transformControls.object;
-            // Clamp scale to max 10 per axis, no minimum limit
-            obj.scale.x = Math.min(10, obj.scale.x);
-            obj.scale.y = Math.min(10, obj.scale.y);
-            obj.scale.z = Math.min(10, obj.scale.z);
+            const minScale = 0.1;
+            const maxScale = 10;
+            const sensitivityDamping = 0.3; // 30% of intended scale change
 
-            // Prevent negative scale
-            if (obj.scale.x < 0) obj.scale.x = -obj.scale.x;
-            if (obj.scale.y < 0) obj.scale.y = -obj.scale.y;
-            if (obj.scale.z < 0) obj.scale.z = -obj.scale.z;
+            ['x', 'y', 'z'].forEach(axis => {
+                let newScale = obj.scale[axis];
+
+                // Prevent negative scale
+                if (newScale < 0) newScale = -newScale;
+
+                const lastScale = _lastScalePerAxis[axis];
+                if (lastScale > 0) {
+                    // Calculate scale factor (how much it changed)
+                    const scaleFactor = newScale / lastScale;
+
+                    // Apply damping: reduce sensitivity by multiplying factor change by damping coefficient
+                    // e.g., if it wanted to scale by 2x, damping makes it 1.3x instead
+                    const dampedScaleFactor = 1 + (scaleFactor - 1) * sensitivityDamping;
+
+                    newScale = lastScale * dampedScaleFactor;
+                }
+
+                // Clamp to absolute limits
+                newScale = Math.max(minScale, Math.min(maxScale, newScale));
+
+                obj.scale[axis] = newScale;
+                _lastScalePerAxis[axis] = newScale;
+            });
         }
         renderer.render(scene, camera);
     });
@@ -769,6 +792,8 @@ export function initSelectionSystem(onSelectionChange) {
             const selected = _selectionManager.getSelected();
             if (selected) {
                 console.log(`Selected: ${selected.object?.name || '(unnamed)'} [${selected.type}]`);
+                // Mark selection from main viewport
+                _lastSelectionSource = 'main';
                 // Only attach gizmo for model type; wall/ceiling/floor can be selected but not transformed
                 if (transformMode !== 'select' && selected.type === 'model') {
                     _attachGizmo(selected.object);
@@ -787,21 +812,25 @@ export function initSelectionSystem(onSelectionChange) {
     });
 
     // Keyboard shortcuts: Q=Select, W=Translate, E=Rotate, R=Scale
+    // Only allow gizmo activation when selecting from main viewport
     document.addEventListener('keydown', (e) => {
         const key = e.key.toLowerCase();
 
         if (key === 'q') {
             setGizmoMode('select');
             e.preventDefault();
-        } else if (key === 'w') {
-            setGizmoMode('translate');
-            e.preventDefault();
-        } else if (key === 'e') {
-            setGizmoMode('rotate');
-            e.preventDefault();
-        } else if (key === 'r') {
-            setGizmoMode('scale');
-            e.preventDefault();
+        } else if (_lastSelectionSource === 'main') {
+            // Only allow gizmo mode changes from main viewport selection
+            if (key === 'w') {
+                setGizmoMode('translate');
+                e.preventDefault();
+            } else if (key === 'e') {
+                setGizmoMode('rotate');
+                e.preventDefault();
+            } else if (key === 'r') {
+                setGizmoMode('scale');
+                e.preventDefault();
+            }
         }
     });
 }
@@ -812,6 +841,11 @@ function _attachGizmo(object) {
         transformControls.setMode(transformMode);
         // Ensure gizmo is visible and not occluded
         transformControls.visible = true;
+
+        // Reset scale tracking when attaching to a new object
+        _lastScalePerAxis.x = object.scale.x;
+        _lastScalePerAxis.y = object.scale.y;
+        _lastScalePerAxis.z = object.scale.z;
     }
 }
 
@@ -838,6 +872,184 @@ function _configureGizmoRendering(controls) {
             }
         }
     });
+}
+
+/**
+ * Initialize preview viewport selection and drag-to-move interaction.
+ * Allows clicking to select objects and dragging to move dropped models.
+ */
+export function initPreviewSelection() {
+    const previewCanvas = previewRenderer.domElement;
+
+    // ===== Click to Select =====
+    previewCanvas.addEventListener('click', (event) => {
+        // Don't select if we just finished dragging
+        if (_previewDraggingModel) {
+            return;
+        }
+
+        const meshes = [];
+        if (lowPolyGroup) {
+            lowPolyGroup.traverse(child => { if (child.isMesh) meshes.push(child); });
+        }
+
+        // Include dropped models
+        const droppedMeshes = [];
+        droppedModels.forEach(model => {
+            model.traverse(child => { if (child.isMesh) droppedMeshes.push(child); });
+        });
+
+        const allMeshes = [...meshes, ...droppedMeshes];
+
+        if (allMeshes.length === 0) {
+            if (_selectionManager) {
+                _selectionManager.deselect();
+                _detachGizmo();
+            }
+            return;
+        }
+
+        const hit = _previewRaycaster.cast(event, previewCanvas, fixedCamera, allMeshes);
+
+        if (hit && _selectionManager) {
+            // Auto-detect selection type
+            let targetType = 'model';
+            if (hit.object) {
+                const label = getLabelFromMesh(hit.object);
+                if (label === 'wall' || label === 'ceiling' || label === 'floor') {
+                    targetType = label;
+                } else if (hit.object.parent && hit.object.parent.isMesh) {
+                    const parentLabel = getLabelFromMesh(hit.object.parent);
+                    if (parentLabel === 'wall' || parentLabel === 'ceiling' || parentLabel === 'floor') {
+                        targetType = parentLabel;
+                    }
+                }
+            }
+
+            _selectionManager.setType(targetType);
+            _selectionManager.handleHit(hit);
+
+            const selected = _selectionManager.getSelected();
+            if (selected) {
+                // Preview viewport: always stay in select mode, never attach gizmo
+                _lastSelectionSource = 'preview';
+                _detachGizmo();
+                // Force select mode when clicking in preview
+                transformMode = 'select';
+            } else {
+                _detachGizmo();
+            }
+        } else {
+            if (_selectionManager) {
+                _selectionManager.deselect();
+                _detachGizmo();
+            }
+        }
+    });
+
+    // ===== Drag to Move (only for dropped models) =====
+    previewCanvas.addEventListener('mousedown', (event) => {
+        // Only allow dragging with left mouse button
+        if (event.button !== 0) return;
+
+        const droppedMeshes = [];
+        droppedModels.forEach(model => {
+            model.traverse(child => { if (child.isMesh) droppedMeshes.push(child); });
+        });
+
+        if (droppedMeshes.length === 0) return;
+
+        // Raycast to dropped models to find which one to drag
+        const hit = _previewRaycaster.cast(event, previewCanvas, fixedCamera, droppedMeshes);
+
+        if (hit) {
+            // Find the root dropped model
+            let dragModel = null;
+            for (const model of droppedModels) {
+                if (model.getObjectById(hit.object.id) || hit.object === model) {
+                    dragModel = model;
+                    break;
+                }
+                // Check if hit object is descendant of this model
+                let current = hit.object;
+                while (current) {
+                    if (current === model) {
+                        dragModel = model;
+                        break;
+                    }
+                    current = current.parent;
+                }
+                if (dragModel) break;
+            }
+
+            if (dragModel) {
+                _previewDraggingModel = dragModel;
+            }
+        }
+    });
+
+    previewCanvas.addEventListener('mousemove', (event) => {
+        if (!_previewDraggingModel) return;
+
+        // Always raycast to lowPolyGroup (not dropped models) for consistent movement
+        const lowPolyMeshes = [];
+        if (lowPolyGroup) {
+            lowPolyGroup.traverse(child => { if (child.isMesh) lowPolyMeshes.push(child); });
+        }
+
+        let currentHit = null;
+        if (lowPolyMeshes.length > 0) {
+            currentHit = _previewRaycaster.cast(event, previewCanvas, fixedCamera, lowPolyMeshes);
+        }
+
+        if (currentHit) {
+            // Set model position directly to hit point (same as marker sphere)
+            _previewDraggingModel.position.copy(currentHit.point);
+
+            // Apply alignment to normal like marker sphere does
+            if (alignToNormal && currentHit.face) {
+                const worldNormal = currentHit.face.normal.clone()
+                    .transformDirection(currentHit.object.matrixWorld);
+                _previewDraggingModel.quaternion.setFromUnitVectors(
+                    new THREE.Vector3(0, 1, 0), worldNormal
+                );
+            } else {
+                _previewDraggingModel.quaternion.identity();
+            }
+        } else {
+            // No hit on lowPoly: project to Y=0 plane and reset rotation
+            const point = _projectToPlane(event, previewCanvas, new THREE.Vector3(0, 1, 0), 0);
+            _previewDraggingModel.position.copy(point);
+            _previewDraggingModel.quaternion.identity();
+        }
+    });
+
+    previewCanvas.addEventListener('mouseup', () => {
+        _previewDraggingModel = null;
+    });
+
+    previewCanvas.addEventListener('mouseleave', () => {
+        _previewDraggingModel = null;
+    });
+}
+
+/**
+ * Project mouse position to a plane at a given distance along normal.
+ * @private
+ */
+function _projectToPlane(event, canvas, planeNormal, planeDistance) {
+    const rect = canvas.getBoundingClientRect();
+    const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), fixedCamera);
+
+    const plane = new THREE.Plane(planeNormal, planeDistance);
+    const point = new THREE.Vector3();
+    raycaster.ray.intersectPlane(plane, point);
+
+    return point;
 }
 
 export function setSelectionType(type) {
@@ -875,3 +1087,29 @@ export function setGizmoMode(mode) {
         }
     }
 }
+
+export function applyScaleFactor(factor) {
+    const selected = _selectionManager?.getSelected();
+    if (!selected || !selected.object) {
+        console.warn('No object selected for scaling');
+        return;
+    }
+
+    const obj = selected.object;
+
+    // Set scale to the specified value (0-10)
+    ['x', 'y', 'z'].forEach(axis => {
+        let newScale = factor;
+
+        // Prevent negative or zero scale
+        if (newScale <= 0) newScale = 0.1;
+
+        obj.scale[axis] = newScale;
+        _lastScalePerAxis[axis] = newScale;
+    });
+
+    // Trigger render
+    renderer.render(scene, camera);
+    console.log(`Set object scale to ${factor}. New scale: [${obj.scale.x.toFixed(3)}, ${obj.scale.y.toFixed(3)}, ${obj.scale.z.toFixed(3)}]`);
+}
+
