@@ -1011,6 +1011,9 @@ function _configureGizmoRendering(controls) {
 export function initPreviewSelection() {
     const previewCanvas = previewRenderer.domElement;
 
+    // Per-model yaw offset (radians) accumulated via scroll wheel during preview drag
+    const _modelYaws = new WeakMap();
+
     // ===== Click to Select =====
     previewCanvas.addEventListener('click', (event) => {
         // Don't select if we just finished dragging
@@ -1152,7 +1155,27 @@ export function initPreviewSelection() {
             _previewDraggingModel.position.copy(point);
             _previewDraggingModel.quaternion.identity();
         }
+
+        // Apply per-model yaw (surface-normal axis rotation) on top of alignment
+        const yaw = _modelYaws.get(_previewDraggingModel) || 0;
+        if (yaw !== 0) {
+            const yawQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+            _previewDraggingModel.quaternion.multiply(yawQ);
+        }
     });
+
+    // ===== Scroll Wheel to Yaw Rotate (only while dragging) =====
+    previewCanvas.addEventListener('wheel', (event) => {
+        if (!_previewDraggingModel) return;
+        event.preventDefault();
+        // ~0.003 rad per pixel of deltaY → roughly 17° per scroll notch (deltaY≈100)
+        const delta = event.deltaY * 0.003;
+        const currentYaw = _modelYaws.get(_previewDraggingModel) || 0;
+        _modelYaws.set(_previewDraggingModel, currentYaw + delta);
+        // Apply immediately so rotation is visible without waiting for next mousemove
+        const yawQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), delta);
+        _previewDraggingModel.quaternion.multiply(yawQ);
+    }, { passive: false });
 
     previewCanvas.addEventListener('mouseup', () => {
         _previewDraggingModel = null;
