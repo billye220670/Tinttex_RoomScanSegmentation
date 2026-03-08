@@ -517,6 +517,12 @@ button {
     flex: 1;
 }
 
+.selection-hint {
+    font-size: clamp(8px, 0.85vmin, 10px);
+    color: #666;
+    margin-bottom: clamp(4px, 0.6vmin, 7px);
+}
+
 .selection-info {
     font-size: clamp(9px, 0.95vmin, 11px);
     color: #aaa;

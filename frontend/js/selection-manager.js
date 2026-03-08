@@ -6,6 +6,7 @@ import * as THREE from 'three';
  * - Track selection state and type (model/wall/ceiling/floor/face)
  * - Apply and clear visual highlights in scene
  * - Emit onChange events for UI updates
+ * - Support multi-select via Shift+Click (same type only)
  *
  * Does NOT:
  * - Perform raycasting (caller's responsibility)
@@ -19,9 +20,14 @@ export class SelectionManager {
         this.getDroppedModelsFn = getDroppedModelsFn; // () => [models...]
 
         this.selectionType = 'model'; // 'model'|'wall'|'ceiling'|'floor'|'face'
-        this.selectedObject = null; // { object, type, faceIndex? }
+        // Multi-select: list of { object, type, faceIndex? }
+        this._selectedItems = [];
+        this._selectionType = null; // Common type of all selected items
 
-        this.highlightMeshes = []; // Array of THREE.LineSegments or Mesh for highlights
+        // Backward compat alias (kept for external callers using getSelected())
+        this.selectedObject = null;
+
+        this.highlightMeshes = []; // Array of { lines, forObject } for per-object removal
         this.callbacks = [];
     }
 
@@ -33,15 +39,19 @@ export class SelectionManager {
             this.selectionType = type;
             // Clear current highlight since type changed
             this._clearHighlight();
+            this._selectedItems = [];
+            this._selectionType = null;
+            this.selectedObject = null;
         }
     }
 
     /**
      * Handle a raycaster hit
      * @param {THREE.Intersection} hit - from raycaster.intersectObjects()
+     * @param {boolean} shiftHeld - if true, add/remove from multi-selection
      * @returns {boolean} true if selection changed
      */
-    handleHit(hit) {
+    handleHit(hit, shiftHeld = false) {
         if (!hit) {
             this.deselect();
             return true;
@@ -49,13 +59,40 @@ export class SelectionManager {
 
         const target = this._resolveTarget(hit);
         if (!target) {
-            this.deselect();
+            if (!shiftHeld) this.deselect();
             return true;
         }
 
-        this._clearHighlight();
-        this.selectedObject = target;
-        this._applyHighlight(target);
+        if (!shiftHeld) {
+            // Normal click: replace selection entirely
+            this._clearHighlight();
+            this._selectedItems = [target];
+            this._selectionType = target.type;
+            this.selectedObject = target;
+            this._applyHighlight(target);
+            this._notifyChange();
+            return true;
+        }
+
+        // Shift+Click multi-select (same type only)
+        if (this._selectionType !== null && target.type !== this._selectionType) {
+            // Type mismatch: ignore
+            return false;
+        }
+
+        const idx = this._selectedItems.findIndex(x => x.object === target.object);
+        if (idx >= 0) {
+            // Already selected: deselect this item
+            this._removeHighlightForObject(this._selectedItems[idx].object);
+            this._selectedItems.splice(idx, 1);
+        } else {
+            // New item: add to selection
+            this._selectedItems.push(target);
+            this._appendHighlight(target);
+        }
+
+        this._selectionType = this._selectedItems.length > 0 ? this._selectedItems[0].type : null;
+        this.selectedObject = this._selectedItems[0] || null;
         this._notifyChange();
         return true;
     }
@@ -64,18 +101,50 @@ export class SelectionManager {
      * Clear selection and highlight
      */
     deselect() {
-        if (!this.selectedObject) return;
+        if (this._selectedItems.length === 0) return;
         this._clearHighlight();
+        this._selectedItems = [];
+        this._selectionType = null;
         this.selectedObject = null;
         this._notifyChange();
     }
 
     /**
-     * Get current selection
+     * Directly set a single resolved target (bypasses _resolveTarget).
+     * Used after merge to re-select the merged mesh.
+     * @param {{ object, type }} target
+     */
+    _selectSingle(target) {
+        this._clearHighlight();
+        this._selectedItems = [target];
+        this._selectionType = target.type;
+        this.selectedObject = target;
+        this._applyHighlight(target);
+        this._notifyChange();
+    }
+
+    /**
+     * Get current selection (first item for backward compat)
      * @returns {{ object, type, faceIndex? } | null}
      */
     getSelected() {
-        return this.selectedObject;
+        return this._selectedItems[0] || null;
+    }
+
+    /**
+     * Get all selected items
+     * @returns {Array<{ object, type }>}
+     */
+    getSelectedItems() {
+        return [...this._selectedItems];
+    }
+
+    /**
+     * Get the common type of selected items, or null if nothing selected
+     * @returns {string|null}
+     */
+    getSelectedType() {
+        return this._selectionType;
     }
 
     /**
@@ -135,14 +204,21 @@ export class SelectionManager {
     }
 
     /**
-     * Apply visual highlight
+     * Apply visual highlight for a target (single target, appends to list)
      * @private
      */
     _applyHighlight(target) {
+        this._appendHighlight(target);
+    }
+
+    /**
+     * Append highlight lines for one target without clearing existing ones
+     * @private
+     */
+    _appendHighlight(target) {
         const color = 0xffee00; // Yellow
 
         if (target.type === 'model') {
-            // For model (Group), highlight all child meshes
             const group = target.object;
             group.traverse((child) => {
                 if (child.isMesh) {
@@ -150,23 +226,33 @@ export class SelectionManager {
                     const edgesMat = new THREE.LineBasicMaterial({ color, linewidth: 2 });
                     const lines = new THREE.LineSegments(edgesGeo, edgesMat);
                     lines.renderOrder = 1;
-
                     child.add(lines);
-                    this.highlightMeshes.push(lines);
+                    this.highlightMeshes.push({ lines, forObject: child });
                 }
             });
         } else if (['wall', 'ceiling', 'floor'].includes(target.type)) {
-            // Edge highlight for mesh
             const mesh = target.object;
-
             const edgesGeo = new THREE.EdgesGeometry(mesh.geometry);
             const edgesMat = new THREE.LineBasicMaterial({ color, linewidth: 2 });
             const lines = new THREE.LineSegments(edgesGeo, edgesMat);
             lines.renderOrder = 1;
-
             mesh.add(lines);
-            this.highlightMeshes.push(lines);
+            this.highlightMeshes.push({ lines, forObject: mesh });
         }
+    }
+
+    /**
+     * Remove highlight for a specific object only
+     * @private
+     */
+    _removeHighlightForObject(mesh) {
+        const toRemove = this.highlightMeshes.filter(h => h.forObject === mesh);
+        toRemove.forEach(h => {
+            if (h.lines.parent) h.lines.parent.remove(h.lines);
+            if (h.lines.geometry) h.lines.geometry.dispose();
+            if (h.lines.material) h.lines.material.dispose();
+        });
+        this.highlightMeshes = this.highlightMeshes.filter(h => h.forObject !== mesh);
     }
 
     /**
@@ -174,16 +260,16 @@ export class SelectionManager {
      * @private
      */
     _clearHighlight() {
-        this.highlightMeshes.forEach(highlight => {
-            if (highlight.parent) {
-                highlight.parent.remove(highlight);
+        this.highlightMeshes.forEach(h => {
+            if (h.lines.parent) {
+                h.lines.parent.remove(h.lines);
             }
-            if (highlight.geometry) highlight.geometry.dispose();
-            if (highlight.material) {
-                if (Array.isArray(highlight.material)) {
-                    highlight.material.forEach(m => m.dispose());
+            if (h.lines.geometry) h.lines.geometry.dispose();
+            if (h.lines.material) {
+                if (Array.isArray(h.lines.material)) {
+                    h.lines.material.forEach(m => m.dispose());
                 } else {
-                    highlight.material.dispose();
+                    h.lines.material.dispose();
                 }
             }
         });
@@ -195,9 +281,16 @@ export class SelectionManager {
      * @private
      */
     _notifyChange() {
-        const selInfo = this.selectedObject
-            ? `${this.selectedObject.type}: ${this.selectedObject.object?.name || 'unnamed'}`
-            : null;
+        let selInfo;
+        if (this._selectedItems.length === 0) {
+            selInfo = null;
+        } else if (this._selectedItems.length === 1) {
+            const item = this._selectedItems[0];
+            selInfo = `${item.type}: ${item.object?.name || 'unnamed'}`;
+        } else {
+            const names = this._selectedItems.map(x => x.object?.name || 'unnamed').join(', ');
+            selInfo = `${this._selectedItems.length} ${this._selectionType}s selected: ${names}`;
+        }
 
         this.callbacks.forEach(cb => cb(selInfo));
     }

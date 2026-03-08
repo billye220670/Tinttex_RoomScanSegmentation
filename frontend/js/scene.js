@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ViewportRaycaster } from './viewport-raycaster.js';
 import { SelectionManager } from './selection-manager.js';
 import { DragDropLoader } from './drag-drop-loader.js';
@@ -915,9 +916,12 @@ export function initSelectionSystem(onSelectionChange) {
                 }
             }
 
-            // Set the type and handle the hit
-            _selectionManager.setType(targetType);
-            _selectionManager.handleHit(hit);
+            // Set the type and handle the hit (with Shift for multi-select)
+            // Only call setType if not shift-selecting (type change would clear selection)
+            if (!event.shiftKey) {
+                _selectionManager.setType(targetType);
+            }
+            _selectionManager.handleHit(hit, event.shiftKey);
 
             const selected = _selectionManager.getSelected();
             if (selected) {
@@ -941,12 +945,15 @@ export function initSelectionSystem(onSelectionChange) {
         }
     });
 
-    // Keyboard shortcuts: Q=Select, W=Translate, E=Rotate, R=Scale
+    // Keyboard shortcuts: Q=Select, W=Translate, E=Rotate, R=Scale, G=Merge Walls
     // Only allow gizmo activation when selecting from main viewport
     document.addEventListener('keydown', (e) => {
         const key = e.key.toLowerCase();
 
-        if (key === 'q') {
+        if (key === 'g') {
+            _mergeSelectedWalls();
+            e.preventDefault();
+        } else if (key === 'q') {
             setGizmoMode('select');
             e.preventDefault();
         } else if (_lastSelectionSource === 'main') {
@@ -1060,7 +1067,7 @@ export function initPreviewSelection() {
             }
 
             _selectionManager.setType(targetType);
-            _selectionManager.handleHit(hit);
+            _selectionManager.handleHit(hit, event.shiftKey);
 
             const selected = _selectionManager.getSelected();
             if (selected) {
@@ -1287,3 +1294,335 @@ export function setGridVisible(visible) {
     }
 }
 
+// ========== Multi-Select Wall Merge (G Key) ==========
+
+/**
+ * Show a temporary error message in #selection-info, then restore previous text.
+ */
+function _showMergeError(msg) {
+    const el = document.getElementById('selection-info');
+    if (!el) return;
+    const prev = el.textContent;
+    el.style.color = '#ff4444';
+    el.textContent = `⚠ ${msg}`;
+    setTimeout(() => { el.style.color = ''; el.textContent = prev; }, 2000);
+}
+
+/**
+ * Check if two meshes share at least one pair of vertices within tol distance.
+ * Vertices are compared in world space.
+ */
+function _areWallsAdjacent(m1, m2, tol = 0.10) {
+    const pos1 = m1.geometry.attributes.position;
+    const pos2 = m2.geometry.attributes.position;
+    if (!pos1 || !pos2) return false;
+
+    const tolSq = tol * tol;
+    const mw1 = m1.matrixWorld;
+    const mw2 = m2.matrixWorld;
+
+    const v1 = new THREE.Vector3();
+    const v2 = new THREE.Vector3();
+
+    // Build world-space AABB of m2 for quick prefilter
+    const box2 = new THREE.Box3().setFromBufferAttribute(pos2);
+    box2.min.applyMatrix4(mw2);
+    box2.max.applyMatrix4(mw2);
+    box2.expandByScalar(tol);
+
+    for (let i = 0; i < pos1.count; i++) {
+        v1.fromBufferAttribute(pos1, i).applyMatrix4(mw1);
+        if (!box2.containsPoint(v1)) continue;
+        for (let j = 0; j < pos2.count; j++) {
+            v2.fromBufferAttribute(pos2, j).applyMatrix4(mw2);
+            if (v1.distanceToSquared(v2) < tolSq) return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Sort meshes into a linear chain using adjacency.
+ * Returns ordered array or null if not a simple chain.
+ */
+function _buildWallChain(meshes) {
+    const n = meshes.length;
+    // Build adjacency list
+    const adj = Array.from({ length: n }, () => []);
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            if (_areWallsAdjacent(meshes[i], meshes[j])) {
+                adj[i].push(j);
+                adj[j].push(i);
+            }
+        }
+    }
+
+    // Validate: each node at most 2 neighbors (no T-junction)
+    for (let i = 0; i < n; i++) {
+        if (adj[i].length > 2) return null; // branching – unsupported
+    }
+
+    // Find endpoints (nodes with exactly 1 neighbor)
+    const endpoints = [];
+    for (let i = 0; i < n; i++) {
+        if (adj[i].length === 1) endpoints.push(i);
+        if (adj[i].length === 0 && n > 1) return null; // isolated node
+    }
+
+    // For 1 mesh it's trivially a chain (no merge needed, but validate anyway)
+    if (n === 1) return meshes;
+
+    // Must have exactly 2 endpoints for a linear chain
+    if (endpoints.length !== 2) return null;
+
+    // BFS to check connectivity
+    const visited = new Set();
+    const queue = [endpoints[0]];
+    while (queue.length > 0) {
+        const cur = queue.shift();
+        if (visited.has(cur)) continue;
+        visited.add(cur);
+        for (const nb of adj[cur]) queue.push(nb);
+    }
+    if (visited.size !== n) return null; // disconnected
+
+    // Traverse chain from one endpoint
+    const order = [endpoints[0]];
+    let prev = -1;
+    let cur = endpoints[0];
+    while (order.length < n) {
+        const next = adj[cur].find(nb => nb !== prev);
+        if (next === undefined) break;
+        order.push(next);
+        prev = cur;
+        cur = next;
+    }
+
+    return order.map(i => meshes[i]);
+}
+
+/**
+ * Find the centroid of vertices shared between two meshes (within tol).
+ * Returns a THREE.Vector3 in world space.
+ */
+function _findSharedEdgeCenter(m1, m2, tol = 0.10) {
+    const pos1 = m1.geometry.attributes.position;
+    const pos2 = m2.geometry.attributes.position;
+    const mw1 = m1.matrixWorld;
+    const mw2 = m2.matrixWorld;
+    const tolSq = tol * tol;
+
+    const sharedPts = [];
+    const v1 = new THREE.Vector3();
+    const v2 = new THREE.Vector3();
+
+    for (let i = 0; i < pos1.count; i++) {
+        v1.fromBufferAttribute(pos1, i).applyMatrix4(mw1);
+        for (let j = 0; j < pos2.count; j++) {
+            v2.fromBufferAttribute(pos2, j).applyMatrix4(mw2);
+            if (v1.distanceToSquared(v2) < tolSq) {
+                sharedPts.push(v1.clone());
+                break;
+            }
+        }
+    }
+
+    if (sharedPts.length === 0) return null;
+    const center = new THREE.Vector3();
+    sharedPts.forEach(p => center.add(p));
+    center.divideScalar(sharedPts.length);
+    return center;
+}
+
+/**
+ * Compute horizontal tangent for a wall geometry, pointing from entry to exit.
+ * geo: already transformed to lowPolyGroup-local space.
+ * entryPt, exitPt: THREE.Vector3 in world/local space (may be null).
+ */
+function _computeTangentForWall(geo, entryPt, exitPt) {
+    const normAttr = geo.attributes.normal;
+    const avgNormal = new THREE.Vector3();
+    if (normAttr) {
+        const v = new THREE.Vector3();
+        for (let i = 0; i < normAttr.count; i++) {
+            v.fromBufferAttribute(normAttr, i);
+            avgNormal.add(v);
+        }
+        avgNormal.divideScalar(normAttr.count).normalize();
+    }
+
+    const Y_UP = new THREE.Vector3(0, 1, 0);
+    let tangent = new THREE.Vector3().crossVectors(Y_UP, avgNormal);
+    if (tangent.lengthSq() < 1e-6) {
+        tangent.set(1, 0, 0);
+    } else {
+        tangent.normalize();
+    }
+
+    // Determine sign from entry/exit direction hint
+    let dirHint = null;
+    geo.computeBoundingBox();
+    const center = new THREE.Vector3();
+    geo.boundingBox.getCenter(center);
+
+    if (entryPt && exitPt) {
+        dirHint = new THREE.Vector3().subVectors(exitPt, entryPt);
+    } else if (exitPt) {
+        dirHint = new THREE.Vector3().subVectors(exitPt, center);
+    } else if (entryPt) {
+        dirHint = new THREE.Vector3().subVectors(center, entryPt);
+    }
+
+    if (dirHint && dirHint.dot(tangent) < 0) {
+        tangent.negate();
+    }
+
+    return tangent;
+}
+
+/**
+ * Merge selected walls into a single mesh with continuous UV mapping.
+ * u = horizontal arc-length (meters), v = world Y (meters).
+ */
+function _mergeSelectedWalls() {
+    if (!_selectionManager) return;
+
+    const items = _selectionManager.getSelectedItems();
+
+    if (items.length < 2) {
+        _showMergeError('Select at least 2 walls to merge');
+        return;
+    }
+
+    if (items.some(x => x.type !== 'wall')) {
+        _showMergeError('Can only merge walls (all selected must be walls)');
+        return;
+    }
+
+    const meshes = items.map(x => x.object);
+
+    // Validate geometry
+    for (const m of meshes) {
+        if (!m.geometry || !m.geometry.attributes.position) {
+            _showMergeError('One or more walls have invalid geometry');
+            return;
+        }
+    }
+
+    // Build ordered chain
+    const chain = _buildWallChain(meshes);
+    if (!chain) {
+        _showMergeError('Walls must form a connected linear chain (no branching)');
+        return;
+    }
+
+    // Find shared edge centers between consecutive walls
+    const n = chain.length;
+    const sharedEdges = [];
+    for (let i = 0; i < n - 1; i++) {
+        const center = _findSharedEdgeCenter(chain[i], chain[i + 1]);
+        sharedEdges.push(center); // may be null if tolerance too tight
+    }
+
+    // Build merged geometry with continuous UV
+    const groupInvMatrix = new THREE.Matrix4().copy(lowPolyGroup.matrixWorld).invert();
+    const geometries = [];
+    let globalUOffset = 0;
+
+    for (let i = 0; i < n; i++) {
+        const mesh = chain[i];
+        const geo = mesh.geometry.clone();
+
+        // Transform vertices to lowPolyGroup local space
+        const relMatrix = groupInvMatrix.clone().multiply(mesh.matrixWorld);
+        geo.applyMatrix4(relMatrix);
+        geo.computeBoundingBox();
+
+        const entryPt = i > 0 ? sharedEdges[i - 1] : null;
+        const exitPt  = i < n - 1 ? sharedEdges[i] : null;
+
+        const tangent = _computeTangentForWall(geo, entryPt, exitPt);
+
+        // Compute u origin = projection of entry point onto tangent axis
+        const posAttr = geo.attributes.position;
+        let u_at_entry;
+        if (entryPt) {
+            u_at_entry = entryPt.dot(tangent);
+        } else {
+            // First wall: minimum u across all vertices
+            u_at_entry = Infinity;
+            const v = new THREE.Vector3();
+            for (let vi = 0; vi < posAttr.count; vi++) {
+                v.fromBufferAttribute(posAttr, vi);
+                const u = v.dot(tangent);
+                if (u < u_at_entry) u_at_entry = u;
+            }
+        }
+
+        // Assign UVs
+        const uvs = new Float32Array(posAttr.count * 2);
+        const vpos = new THREE.Vector3();
+        for (let vi = 0; vi < posAttr.count; vi++) {
+            vpos.fromBufferAttribute(posAttr, vi);
+            uvs[vi * 2]     = globalUOffset + (vpos.dot(tangent) - u_at_entry);
+            uvs[vi * 2 + 1] = vpos.y; // world Y = height in meters
+        }
+
+        geo.deleteAttribute('uv');
+        geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
+        // Compute this wall's width along tangent for global offset advance
+        let u_at_exit;
+        if (exitPt) {
+            u_at_exit = exitPt.dot(tangent) - u_at_entry;
+        } else {
+            let maxU = -Infinity;
+            const vv = new THREE.Vector3();
+            for (let vi = 0; vi < posAttr.count; vi++) {
+                vv.fromBufferAttribute(posAttr, vi);
+                const u = vv.dot(tangent) - u_at_entry;
+                if (u > maxU) maxU = u;
+            }
+            u_at_exit = maxU;
+        }
+        globalUOffset += u_at_exit;
+
+        geometries.push(geo);
+    }
+
+    // Merge all geometries
+    const mergedGeo = mergeGeometries(geometries, false);
+    if (!mergedGeo) {
+        _showMergeError('Geometry merge failed');
+        return;
+    }
+    mergedGeo.computeVertexNormals();
+
+    // Create the merged mesh with wall color
+    const mergedMesh = new THREE.Mesh(
+        mergedGeo,
+        new THREE.MeshLambertMaterial({ color: 0x2196F3, side: THREE.DoubleSide })
+    );
+    mergedMesh.name = 'wall_merged';
+    mergedMesh.castShadow = false;
+    mergedMesh.receiveShadow = false;
+
+    // Remove original meshes
+    for (const mesh of chain) {
+        const parent = mesh.parent || lowPolyGroup;
+        parent.remove(mesh);
+        mesh.geometry.dispose();
+    }
+
+    lowPolyGroup.add(mergedMesh);
+
+    // Clear selection, re-select merged mesh, apply display modes
+    _selectionManager.deselect();
+    _selectionManager.setType('wall');
+    _selectionManager._selectSingle({ object: mergedMesh, type: 'wall' });
+
+    applyDisplayModes();
+
+    console.log(`Merged ${n} walls → wall_merged (UV u=0..${globalUOffset.toFixed(2)}m)`);
+}
