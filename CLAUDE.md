@@ -25,9 +25,12 @@ Access at: http://localhost:8000
 - **Three.js-based 3D rendering** with dual viewport system:
   - Main viewport: Interactive 3D scene with OrbitControls
   - Preview viewport: Fixed camera at origin (0,0,0) with transparent rendering overlay on Raw.png background image
-- **scene.js**: Scene initialization, camera setup, GLB loading, and rendering loops
+- **scene.js**: Scene initialization, camera setup, GLB loading, rendering loops, selection/merge logic
 - **ui.js**: Control panel sliders and callbacks
 - **main.js**: Application entry point, API communication, workflow orchestration
+- **selection-manager.js**: Multi-select/highlight logic (model/wall/ceiling/floor), Shift+Click support
+- **drag-drop-loader.js**: GLB/GLTF drag-and-drop loading with ray-cast placement
+- **viewport-raycaster.js**: Canvas-agnostic raycasting helper
 
 ### Backend (backend/)
 - **FastAPI server** (app.py) with static file serving and API endpoints
@@ -126,6 +129,53 @@ Access at: http://localhost:8000
 4. **Step 4**: Classify — semantic labeling (floor/ceiling/wall) with colors
 5. **Step 5**: Generate Mesh — Phase 1 expanded rectangles, no trimming
 6. **Step 6**: Trim Mesh — Phase 1 + Phase 2 trimming applied
+
+### Multi-Select & Wall Merge
+- **Shift+Click** in main or preview viewport: add/remove same-type elements (wall/ceiling/floor) to selection
+  - Shift-clicking an already-selected mesh removes it from the selection
+  - Type mismatch (e.g. wall + ceiling) is silently ignored
+- **G key**: merge all selected walls into one mesh with continuous UV mapping
+  - Prerequisite: ≥ 2 walls selected, all same type, forming a connected linear chain (no T-junctions)
+  - UV layout: **u = horizontal arc-length (meters)**, **v = world Y height (meters)**
+    - 1 unit = 1 metre in both axes — zero distortion, consistent across all merged panels
+    - At any wall junction the u coordinate is continuous, so textures slide smoothly across the seam
+  - Merged mesh is named `wall_merged` and is still recognized as `wall` for further merges
+  - Error feedback: `#selection-info` flashes red for 2 seconds on invalid input
+- Implementation in `frontend/js/scene.js`:
+  - `_mergeSelectedWalls()` — entry point, validates and orchestrates
+  - `_buildWallChain(meshes)` — adjacency graph → linear chain ordering
+  - `_areWallsAdjacent(m1, m2, tol)` — world-space vertex proximity (AABB prefilter + O(n·m) check)
+  - `_findSharedEdgeCenter(m1, m2)` — centroid of shared boundary vertices
+  - `_computeTangentForWall(geo, entryPt, exitPt)` — horizontal tangent with correct sign
+- Implementation in `frontend/js/selection-manager.js`:
+  - `_selectedItems[]` replaces single `selectedObject` (backward-compat alias kept)
+  - `handleHit(hit, shiftHeld)` — normal click replaces; shift click toggles
+  - `getSelectedItems()`, `getSelectedType()`, `_selectSingle(target)`
+  - `_appendHighlight()` / `_removeHighlightForObject()` for per-item highlight management
+
+### Display Modes (per label)
+Each of Wall / Ceiling / Floor can independently be set to:
+- **solid** — `MeshLambertMaterial` with semantic color (blue/green/red)
+- **checker** — canvas checker-board texture + planar UV projection (default)
+- **grid** — semi-transparent grid texture
+- **shadowcatcher** — `THREE.ShadowMaterial` (mesh invisible, shows cast shadows from dropped models)
+- **none** — fully transparent (raycasting still works)
+
+Shadow Catcher notes:
+- Both renderers have `shadowMap.enabled = true` (PCFSoftShadow)
+- `directionalLight.castShadow = true`, mapSize 4096×4096
+- Dropped models automatically set `child.castShadow = true`
+
+### Drag-Drop & Selection System
+- Drag a GLB/GLTF file onto the main viewport to place it at the cursor's 3D hit point
+- **Click** to select: auto-detects wall/ceiling/floor vs. dropped model
+- **Shift+Click** to multi-select same-type elements (see Multi-Select & Wall Merge above)
+- Transform gizmo (TransformControls) attaches to selected dropped models only
+  - **Q** — select mode (no gizmo)
+  - **W** — translate
+  - **E** — rotate
+  - Gizmo rendered on top of all geometry (depthTest/depthWrite disabled, renderOrder=100)
+- **G** — merge selected walls (see Multi-Select & Wall Merge above)
 
 ## Common Parameters
 
