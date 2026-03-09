@@ -1,4 +1,4 @@
-import { initScene, loadOriginalModel, hideOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode, setMarkerShape, setAlignToNormal, initDragDrop, initSelectionSystem, initPreviewSelection, setGizmoMode, applyScaleFactor, updateLightDirection, updateLightIntensity, setGridVisible } from './scene.js';
+import { initScene, loadOriginalModel, hideOriginalModel, addLowPolyOverlay, getCurrentLowPolyData, initCameraPreview, updateCameraFOV, setPreviewOpacity, setDisplayMode, setMarkerShape, setAlignToNormal, initDragDrop, initSelectionSystem, initPreviewSelection, setGizmoMode, applyScaleFactor, updateLightDirection, updateLightIntensity, setGridVisible, clearWallTexture, setPreviewInteractionMode } from './scene.js';
 import { initUI, showLoading, hideLoading, setButtonEnabled, showDownloadButton, updateStats, showError, setFOVSliderValue, updateSelectionInfo } from './ui.js';
 
 // Initialize application
@@ -48,6 +48,22 @@ async function init() {
         updateSelectionInfo(selInfo);
     });
     initPreviewSelection();
+
+    // Clear wall texture button
+    document.getElementById('clear-wall-texture-btn')?.addEventListener('click', () => {
+        clearWallTexture();
+    });
+
+    // Preview mode toggle (Select / Paint)
+    const btnSelect = document.getElementById('preview-mode-select');
+    const btnPaint  = document.getElementById('preview-mode-paint');
+    function setPreviewMode(mode) {
+        setPreviewInteractionMode(mode);
+        btnSelect.classList.toggle('active', mode === 'select');
+        btnPaint.classList.toggle('active',  mode === 'paint');
+    }
+    btnSelect?.addEventListener('click', () => setPreviewMode('select'));
+    btnPaint?.addEventListener('click',  () => setPreviewMode('paint'));
 }
 
 async function runStep1(params) {

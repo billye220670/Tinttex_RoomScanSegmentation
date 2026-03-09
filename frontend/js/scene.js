@@ -33,6 +33,17 @@ let _justFinishedDragging = false; // Prevent click after dragging from deselect
 // Preview viewport interaction state
 let _previewDraggingModel = null;
 let _lastSelectionSource = 'main'; // Track selection source: 'main' or 'preview'
+let _previewInteractionMode = 'select'; // 'select' | 'paint'
+
+// Wall texture drag-drop state
+let currentWallTexture = null;       // 用户拖入的自定义贴图（仅保存图像源，变换独立于每面墙）
+let _textureDragging = false;        // 是否正在拖动贴图
+let _textureDragMesh = null;         // 当前被拖动贴图的具体mesh
+let _textureDragStartX = 0;          // 拖动起始屏幕X坐标
+let _textureDragStartY = 0;          // 拖动起始屏幕Y坐标
+let _textureDragStartOffsetX = 0;    // 拖动起始texture.offset.x
+let _textureDragStartOffsetY = 0;    // 拖动起始texture.offset.y
+let _textureDragDepth = 0;           // 拖动起始的相机到hit点距离
 
 // Main viewport drag detection (to prevent click selection after camera drag)
 let _mainViewportMouseDownPos = null;
@@ -301,6 +312,11 @@ export function setPreviewOpacity(opacity) {
 }
 
 export function setDisplayMode(label, mode) {
+    if (label === 'wall' && currentWallTexture) {
+        currentWallTexture.dispose();
+        currentWallTexture = null;
+        _updateTextureIndicator();
+    }
     displayModes[label] = mode;
     applyDisplayModes();
 }
@@ -473,6 +489,50 @@ function generatePlanarUVs(geometry) {
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 }
 
+function _applyWallTextureToMeshes() {
+    if (!lowPolyGroup || !currentWallTexture) return;
+    lowPolyGroup.traverse((child) => {
+        if (!child.isMesh) return;
+        if (getLabelFromMesh(child) !== 'wall') return;
+        const tex = currentWallTexture.clone();
+        tex.center.set(0.5, 0.5); // rotate around texture center
+        tex.needsUpdate = true;
+        child.receiveShadow = true;
+        child.material = new THREE.MeshLambertMaterial({
+            map: tex,
+            side: THREE.FrontSide,
+        });
+        child.material.needsUpdate = true;
+    });
+}
+
+function _updateTextureIndicator() {
+    const indicator = document.getElementById('wall-texture-indicator');
+    if (!indicator) return;
+    indicator.style.display = currentWallTexture ? 'flex' : 'none';
+}
+
+export function clearWallTexture() {
+    if (currentWallTexture) {
+        currentWallTexture.dispose();
+        currentWallTexture = null;
+    }
+    _updateTextureIndicator();
+    applyDisplayModes();
+}
+
+export function setPreviewInteractionMode(mode) {
+    _previewInteractionMode = mode;
+    // Reset any in-progress drag when switching modes
+    _textureDragging = false;
+    _textureDragMesh = null;
+    _previewDraggingModel = null;
+    // Restore cursor based on new mode
+    if (previewRenderer) {
+        previewRenderer.domElement.style.cursor = 'crosshair';
+    }
+}
+
 function applyDisplayModes() {
     if (!lowPolyGroup) return;
 
@@ -487,6 +547,20 @@ function applyDisplayModes() {
 
         child.receiveShadow = false;
         child.castShadow = false;
+
+        // Custom texture override for walls
+        if (label === 'wall' && currentWallTexture) {
+            const tex = currentWallTexture.clone();
+            tex.center.set(0.5, 0.5);
+            tex.needsUpdate = true;
+            child.receiveShadow = true;
+            child.material = new THREE.MeshLambertMaterial({
+                map: tex,
+                side: THREE.FrontSide,
+            });
+            child.material.needsUpdate = true;
+            return; // skip normal mode
+        }
 
         if (mode === 'shadowcatcher') {
             child.receiveShadow = true;
@@ -678,8 +752,56 @@ export function initCameraPreview() {
     previewRenderer.domElement.addEventListener('mousemove', onPreviewMouseMove);
     previewRenderer.domElement.addEventListener('mouseleave', onPreviewMouseLeave);
 
+    // Image drag-drop onto preview canvas → apply as wall texture
+    const previewCanvas = previewRenderer.domElement;
+    const previewOverlay = document.getElementById('preview-drop-overlay');
+
+    previewCanvas.addEventListener('dragenter', (e) => {
+        if (_isDragImage(e.dataTransfer)) {
+            e.preventDefault();
+            if (previewOverlay) previewOverlay.style.display = 'flex';
+        }
+    });
+    previewCanvas.addEventListener('dragleave', () => {
+        if (previewOverlay) previewOverlay.style.display = 'none';
+    });
+    previewCanvas.addEventListener('dragover', (e) => {
+        if (_isDragImage(e.dataTransfer)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+    });
+    previewCanvas.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (previewOverlay) previewOverlay.style.display = 'none';
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) {
+            _loadWallTexture(file);
+        }
+    });
+
     window.addEventListener('resize', onPreviewResize);
     animatePreview();
+}
+
+function _isDragImage(dataTransfer) {
+    if (!dataTransfer || !dataTransfer.items || dataTransfer.items.length === 0) return false;
+    return dataTransfer.items[0].type.startsWith('image/');
+}
+
+function _loadWallTexture(file) {
+    const url = URL.createObjectURL(file);
+    const loader = new THREE.TextureLoader();
+    loader.load(url, (texture) => {
+        URL.revokeObjectURL(url);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+        if (currentWallTexture) currentWallTexture.dispose();
+        currentWallTexture = texture;
+        _applyWallTextureToMeshes();
+        _updateTextureIndicator();
+    });
 }
 
 function onPreviewResize() {
@@ -716,8 +838,16 @@ function onPreviewMouseMove(event) {
         }
 
         markerSphere.visible = true;
+
+        // Update cursor based on interaction mode
+        if (_previewInteractionMode === 'paint' && currentWallTexture && getLabelFromMesh(hit.object) === 'wall') {
+            previewRenderer.domElement.style.cursor = _textureDragging ? 'grabbing' : 'grab';
+        } else {
+            previewRenderer.domElement.style.cursor = 'crosshair';
+        }
     } else {
         markerSphere.visible = false;
+        previewRenderer.domElement.style.cursor = 'crosshair';
     }
 }
 
@@ -1039,6 +1169,9 @@ export function initPreviewSelection() {
 
     // ===== Click to Select =====
     previewCanvas.addEventListener('click', (event) => {
+        // Paint mode: no selection on click
+        if (_previewInteractionMode !== 'select') return;
+
         // Don't select if we just finished dragging
         if (_previewDraggingModel) {
             return;
@@ -1103,11 +1236,42 @@ export function initPreviewSelection() {
         }
     });
 
-    // ===== Drag to Move (only for dropped models) =====
+    // ===== Drag to Move (only for dropped models, select mode only) =====
     previewCanvas.addEventListener('mousedown', (event) => {
         // Only allow dragging with left mouse button
         if (event.button !== 0) return;
 
+        // In paint mode: handle texture drag only (skip model drag)
+        if (_previewInteractionMode === 'paint') {
+            if (currentWallTexture) {
+                const wallMeshes = [];
+                if (lowPolyGroup) {
+                    lowPolyGroup.traverse(c => {
+                        if (c.isMesh && getLabelFromMesh(c) === 'wall') wallMeshes.push(c);
+                    });
+                }
+                if (wallMeshes.length > 0) {
+                    const wallHit = _previewRaycaster.cast(event, previewCanvas, fixedCamera, wallMeshes);
+                    if (wallHit) {
+                        const tex = wallHit.object.material && wallHit.object.material.map;
+                        if (tex) {
+                            _textureDragging = true;
+                            _textureDragMesh = wallHit.object;
+                            _textureDragStartX = event.clientX;
+                            _textureDragStartY = event.clientY;
+                            _textureDragStartOffsetX = tex.offset.x;
+                            _textureDragStartOffsetY = tex.offset.y;
+                            _textureDragDepth = wallHit.point.length();
+                            previewCanvas.style.cursor = 'grabbing';
+                            event.preventDefault();
+                        }
+                    }
+                }
+            }
+            return; // never model-drag in paint mode
+        }
+
+        // ===== Select mode: model drag only =====
         const droppedMeshes = [];
         droppedModels.forEach(model => {
             model.traverse(child => { if (child.isMesh) droppedMeshes.push(child); });
@@ -1145,6 +1309,31 @@ export function initPreviewSelection() {
     });
 
     previewCanvas.addEventListener('mousemove', (event) => {
+        // Texture sliding has highest priority — handle before model drag
+        if (_textureDragging && _textureDragMesh) {
+            const tex = _textureDragMesh.material && _textureDragMesh.material.map;
+            if (!tex) { _textureDragging = false; _textureDragMesh = null; return; }
+
+            const screenDeltaX = event.clientX - _textureDragStartX;
+            const screenDeltaY = event.clientY - _textureDragStartY;
+
+            // Convert screen pixels to world metres at the drag depth
+            const fovVRad = (fixedCamera.fov * Math.PI) / 180;
+            const canvasW = previewRenderer.domElement.width;
+            const canvasH = previewRenderer.domElement.height;
+            const aspect = canvasW / canvasH;
+            const fovHRad = 2 * Math.atan(Math.tan(fovVRad / 2) * aspect);
+
+            const depth = _textureDragDepth > 0 ? _textureDragDepth : 1;
+            const worldPerPixelH = (2 * depth * Math.tan(fovHRad / 2)) / canvasW;
+            const worldPerPixelV = (2 * depth * Math.tan(fovVRad / 2)) / canvasH;
+
+            tex.offset.x = _textureDragStartOffsetX + screenDeltaX * worldPerPixelH;
+            tex.offset.y = _textureDragStartOffsetY - screenDeltaY * worldPerPixelV;
+            // offset/repeat/rotation are shader uniforms — no needsUpdate required
+            return; // don't update marker while sliding texture
+        }
+
         if (!_previewDraggingModel) return;
 
         // Always raycast to lowPolyGroup (not dropped models) for consistent movement
@@ -1187,8 +1376,27 @@ export function initPreviewSelection() {
         }
     });
 
-    // ===== Scroll Wheel to Yaw Rotate (only while dragging) =====
+    // ===== Scroll Wheel =====
     previewCanvas.addEventListener('wheel', (event) => {
+        // Paint mode + texture drag: scale (default) or rotate (alt held)
+        if (_previewInteractionMode === 'paint' && _textureDragging && _textureDragMesh) {
+            event.preventDefault();
+            const tex = _textureDragMesh.material && _textureDragMesh.material.map;
+            if (!tex) return;
+            if (event.altKey) {
+                // Alt + scroll → rotate around texture center (set in _applyWallTextureToMeshes)
+                tex.rotation += event.deltaY * 0.003;
+            } else {
+                // Scroll → uniform scale: repeat shrinks = texture appears larger
+                const factor = Math.pow(0.998, event.deltaY);
+                tex.repeat.x *= factor;
+                tex.repeat.y *= factor;
+            }
+            // offset/repeat/rotation are shader uniforms — no needsUpdate required
+            return;
+        }
+
+        // Select mode: yaw rotation for dragged model
         if (!_previewDraggingModel) return;
         event.preventDefault();
         // ~0.003 rad per pixel of deltaY → roughly 17° per scroll notch (deltaY≈100)
@@ -1202,10 +1410,20 @@ export function initPreviewSelection() {
 
     previewCanvas.addEventListener('mouseup', () => {
         _previewDraggingModel = null;
+        if (_textureDragging) {
+            _textureDragging = false;
+            _textureDragMesh = null;
+            previewCanvas.style.cursor = 'grab';
+        }
     });
 
     previewCanvas.addEventListener('mouseleave', () => {
         _previewDraggingModel = null;
+        if (_textureDragging) {
+            _textureDragging = false;
+            _textureDragMesh = null;
+            previewCanvas.style.cursor = 'crosshair';
+        }
     });
 }
 

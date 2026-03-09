@@ -51,8 +51,15 @@
             <div class="preview-section">
                 <div id="camera-preview-container">
                     <img id="preview-background" src="/Raw.png" alt="Background">
+                    <div id="preview-drop-overlay">
+                        <span>Drop image as wall texture</span>
+                    </div>
                 </div>
                 <div class="preview-controls">
+                    <div class="preview-mode-row">
+                        <button id="preview-mode-select" class="preview-mode-btn active" title="Click to select meshes">Select</button>
+                        <button id="preview-mode-paint" class="preview-mode-btn" title="Drag to pan wall texture">Paint</button>
+                    </div>
                     <div class="preview-pair-row">
                         <div class="preview-pair-item">
                             <label for="fov-slider">FOV: <span id="fov-value">60</span>°</label>
@@ -79,6 +86,10 @@
                                 Align to normal
                             </label>
                         </div>
+                    </div>
+                    <div id="wall-texture-indicator" style="display:none;">
+                        <span>Wall texture loaded</span>
+                        <button id="clear-wall-texture-btn" title="Clear wall texture">✕</button>
                     </div>
                 </div>
             </div>
