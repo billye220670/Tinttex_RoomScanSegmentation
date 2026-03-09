@@ -37,6 +37,7 @@ let _previewInteractionMode = 'select'; // 'select' | 'paint'
 
 // Wall texture drag-drop state
 let currentWallTexture = null;       // 用户拖入的自定义贴图（仅保存图像源，变换独立于每面墙）
+let _perWallTexture = new Map();     // Map<mesh.uuid, Texture> 每面墙的独立贴图
 let _textureDragging = false;        // 是否正在拖动贴图
 let _textureDragMesh = null;         // 当前被拖动贴图的具体mesh
 let _textureDragStartX = 0;          // 拖动起始屏幕X坐标
@@ -315,6 +316,11 @@ export function setDisplayMode(label, mode) {
     if (label === 'wall' && currentWallTexture) {
         currentWallTexture.dispose();
         currentWallTexture = null;
+        // 清空所有 per-wall 贴图
+        for (const tex of _perWallTexture.values()) {
+            tex.dispose();
+        }
+        _perWallTexture.clear();
         _updateTextureIndicator();
     }
     displayModes[label] = mode;
@@ -494,22 +500,15 @@ function _applyWallTextureToMeshes() {
     lowPolyGroup.traverse((child) => {
         if (!child.isMesh) return;
         if (getLabelFromMesh(child) !== 'wall') return;
-        const tex = currentWallTexture.clone();
-        tex.center.set(0.5, 0.5); // rotate around texture center
-        tex.needsUpdate = true;
-        child.receiveShadow = true;
-        child.material = new THREE.MeshLambertMaterial({
-            map: tex,
-            side: THREE.FrontSide,
-        });
-        child.material.needsUpdate = true;
+        _applyTextureToSingleMesh(child);
     });
 }
 
 function _updateTextureIndicator() {
     const indicator = document.getElementById('wall-texture-indicator');
     if (!indicator) return;
-    indicator.style.display = currentWallTexture ? 'flex' : 'none';
+    const hasTexture = currentWallTexture || _perWallTexture.size > 0;
+    indicator.style.display = hasTexture ? 'flex' : 'none';
 }
 
 export function clearWallTexture() {
@@ -517,6 +516,11 @@ export function clearWallTexture() {
         currentWallTexture.dispose();
         currentWallTexture = null;
     }
+    // 清空所有 per-wall 贴图
+    for (const tex of _perWallTexture.values()) {
+        tex.dispose();
+    }
+    _perWallTexture.clear();
     _updateTextureIndicator();
     applyDisplayModes();
 }
@@ -549,17 +553,31 @@ function applyDisplayModes() {
         child.castShadow = false;
 
         // Custom texture override for walls
-        if (label === 'wall' && currentWallTexture) {
-            const tex = currentWallTexture.clone();
-            tex.center.set(0.5, 0.5);
-            tex.needsUpdate = true;
-            child.receiveShadow = true;
-            child.material = new THREE.MeshLambertMaterial({
-                map: tex,
-                side: THREE.FrontSide,
-            });
-            child.material.needsUpdate = true;
-            return; // skip normal mode
+        if (label === 'wall') {
+            const perWallTex = _perWallTexture.get(child.uuid);
+            if (perWallTex) {
+                // 使用该墙的独立贴图
+                child.receiveShadow = true;
+                child.material = new THREE.MeshLambertMaterial({
+                    map: perWallTex,
+                    side: THREE.FrontSide,
+                });
+                child.material.needsUpdate = true;
+                return; // skip normal mode
+            } else if (currentWallTexture) {
+                // 回退到全局贴图（首次应用时会存入 _perWallTexture）
+                const tex = currentWallTexture.clone();
+                tex.center.set(0.5, 0.5);
+                tex.needsUpdate = true;
+                child.receiveShadow = true;
+                child.material = new THREE.MeshLambertMaterial({
+                    map: tex,
+                    side: THREE.FrontSide,
+                });
+                child.material.needsUpdate = true;
+                _perWallTexture.set(child.uuid, tex); // 存入 map
+                return; // skip normal mode
+            }
         }
 
         if (mode === 'shadowcatcher') {
@@ -776,7 +794,15 @@ export function initCameraPreview() {
         if (previewOverlay) previewOverlay.style.display = 'none';
         const file = e.dataTransfer.files[0];
         if (file && file.type.startsWith('image/')) {
-            _loadWallTexture(file);
+            // Raycast at drop position to find which wall was hit
+            let targetMesh = null;
+            if (lowPolyGroup) {
+                const wallMeshes = [];
+                lowPolyGroup.traverse(c => { if (c.isMesh && getLabelFromMesh(c) === 'wall') wallMeshes.push(c); });
+                const hit = _previewRaycaster.cast(e, previewCanvas, fixedCamera, wallMeshes);
+                if (hit) targetMesh = hit.object;
+            }
+            _loadWallTexture(file, targetMesh);
         }
     });
 
@@ -789,7 +815,18 @@ function _isDragImage(dataTransfer) {
     return dataTransfer.items[0].type.startsWith('image/');
 }
 
-function _loadWallTexture(file) {
+function _applyTextureToSingleMesh(mesh) {
+    if (!mesh || !currentWallTexture) return;
+    const tex = currentWallTexture.clone();
+    tex.center.set(0.5, 0.5);
+    tex.needsUpdate = true;
+    mesh.receiveShadow = true;
+    mesh.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.FrontSide });
+    mesh.material.needsUpdate = true;
+    _perWallTexture.set(mesh.uuid, tex); // 存入 per-wall map
+}
+
+function _loadWallTexture(file, targetMesh) {
     const url = URL.createObjectURL(file);
     const loader = new THREE.TextureLoader();
     loader.load(url, (texture) => {
@@ -799,7 +836,11 @@ function _loadWallTexture(file) {
         texture.colorSpace = THREE.SRGBColorSpace;
         if (currentWallTexture) currentWallTexture.dispose();
         currentWallTexture = texture;
-        _applyWallTextureToMeshes();
+        if (targetMesh) {
+            _applyTextureToSingleMesh(targetMesh);
+        } else {
+            _applyWallTextureToMeshes();
+        }
         _updateTextureIndicator();
     });
 }
@@ -1328,8 +1369,9 @@ export function initPreviewSelection() {
             const worldPerPixelH = (2 * depth * Math.tan(fovHRad / 2)) / canvasW;
             const worldPerPixelV = (2 * depth * Math.tan(fovVRad / 2)) / canvasH;
 
-            tex.offset.x = _textureDragStartOffsetX + screenDeltaX * worldPerPixelH;
-            tex.offset.y = _textureDragStartOffsetY - screenDeltaY * worldPerPixelV;
+            const panScale = 0.15;
+            tex.offset.x = _textureDragStartOffsetX - screenDeltaX * worldPerPixelH * panScale;
+            tex.offset.y = _textureDragStartOffsetY + screenDeltaY * worldPerPixelV * panScale;
             // offset/repeat/rotation are shader uniforms — no needsUpdate required
             return; // don't update marker while sliding texture
         }
@@ -1388,7 +1430,7 @@ export function initPreviewSelection() {
                 tex.rotation += event.deltaY * 0.003;
             } else {
                 // Scroll → uniform scale: repeat shrinks = texture appears larger
-                const factor = Math.pow(0.998, event.deltaY);
+                const factor = Math.pow(0.998, -event.deltaY);
                 tex.repeat.x *= factor;
                 tex.repeat.y *= factor;
             }
@@ -1770,11 +1812,21 @@ function _mergeSelectedWalls() {
     mergedMesh.castShadow = false;
     mergedMesh.receiveShadow = false;
 
+    // 保留第一面墙的贴图（在删除前获取）
+    const firstChainTex = _perWallTexture.get(chain[0].uuid) || null;
+
     // Remove original meshes
     for (const mesh of chain) {
         const parent = mesh.parent || lowPolyGroup;
         parent.remove(mesh);
         mesh.geometry.dispose();
+        // 清理旧 UUID 的贴图引用（但不 dispose，因为可能被复用）
+        _perWallTexture.delete(mesh.uuid);
+    }
+
+    // 将第一面墙的贴图应用到合并后的 mesh
+    if (firstChainTex) {
+        _perWallTexture.set(mergedMesh.uuid, firstChainTex);
     }
 
     lowPolyGroup.add(mergedMesh);
