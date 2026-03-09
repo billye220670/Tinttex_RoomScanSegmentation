@@ -1456,50 +1456,9 @@ function _findSharedEdgeCenter(m1, m2, tol = 0.10) {
  * geo: already transformed to lowPolyGroup-local space.
  * entryPt, exitPt: THREE.Vector3 in world/local space (may be null).
  */
-function _computeTangentForWall(geo, entryPt, exitPt) {
-    const normAttr = geo.attributes.normal;
-    const avgNormal = new THREE.Vector3();
-    if (normAttr) {
-        const v = new THREE.Vector3();
-        for (let i = 0; i < normAttr.count; i++) {
-            v.fromBufferAttribute(normAttr, i);
-            avgNormal.add(v);
-        }
-        avgNormal.divideScalar(normAttr.count).normalize();
-    }
-
-    const Y_UP = new THREE.Vector3(0, 1, 0);
-    let tangent = new THREE.Vector3().crossVectors(Y_UP, avgNormal);
-    if (tangent.lengthSq() < 1e-6) {
-        tangent.set(1, 0, 0);
-    } else {
-        tangent.normalize();
-    }
-
-    // Determine sign from entry/exit direction hint
-    let dirHint = null;
-    geo.computeBoundingBox();
-    const center = new THREE.Vector3();
-    geo.boundingBox.getCenter(center);
-
-    if (entryPt && exitPt) {
-        dirHint = new THREE.Vector3().subVectors(exitPt, entryPt);
-    } else if (exitPt) {
-        dirHint = new THREE.Vector3().subVectors(exitPt, center);
-    } else if (entryPt) {
-        dirHint = new THREE.Vector3().subVectors(center, entryPt);
-    }
-
-    if (dirHint && dirHint.dot(tangent) < 0) {
-        tangent.negate();
-    }
-
-    return tangent;
-}
-
 /**
  * Merge selected walls into a single mesh with continuous UV mapping.
- * u = horizontal arc-length (meters), v = world Y (meters).
+ * Reuses each wall's existing UV layout; u is offset per wall for continuity.
  */
 function _mergeSelectedWalls() {
     if (!_selectionManager) return;
@@ -1533,15 +1492,8 @@ function _mergeSelectedWalls() {
         return;
     }
 
-    // Find shared edge centers between consecutive walls
+    // Build merged geometry: reuse existing UVs, offset u for continuity
     const n = chain.length;
-    const sharedEdges = [];
-    for (let i = 0; i < n - 1; i++) {
-        const center = _findSharedEdgeCenter(chain[i], chain[i + 1]);
-        sharedEdges.push(center); // may be null if tolerance too tight
-    }
-
-    // Build merged geometry with continuous UV
     const groupInvMatrix = new THREE.Matrix4().copy(lowPolyGroup.matrixWorld).invert();
     const geometries = [];
     let globalUOffset = 0;
@@ -1553,75 +1505,33 @@ function _mergeSelectedWalls() {
         // Transform vertices to lowPolyGroup local space
         const relMatrix = groupInvMatrix.clone().multiply(mesh.matrixWorld);
         geo.applyMatrix4(relMatrix);
-        geo.computeVertexNormals(); // ensure normals exist (backend GLB has none)
-        geo.computeBoundingBox();
+        geo.computeVertexNormals();
 
-        const entryPt = i > 0 ? sharedEdges[i - 1] : null;
-        const exitPt  = i < n - 1 ? sharedEdges[i] : null;
-
-        const tangent = _computeTangentForWall(geo, entryPt, exitPt);
-
-        // Compute in-plane bitangent = N × T (same convention as generatePlanarUVs)
-        // This makes V follow the wall's own surface-local "down" direction,
-        // not world Y, so directional textures flow along the wall plane.
-        const normAttr = geo.attributes.normal;
-        const wallNormal = new THREE.Vector3();
-        if (normAttr) {
-            const vn = new THREE.Vector3();
-            for (let vi = 0; vi < normAttr.count; vi++) {
-                vn.fromBufferAttribute(normAttr, vi);
-                wallNormal.add(vn);
-            }
-            wallNormal.divideScalar(normAttr.count).normalize();
-        }
-        const bitangent = new THREE.Vector3().crossVectors(wallNormal, tangent);
-        if (bitangent.lengthSq() > 1e-12) bitangent.normalize();
-        else bitangent.set(0, -1, 0);
-
-        // Compute u origin = projection of entry point onto tangent axis
-        const posAttr = geo.attributes.position;
-        let u_at_entry;
-        if (entryPt) {
-            u_at_entry = entryPt.dot(tangent);
-        } else {
-            // First wall: minimum u across all vertices
-            u_at_entry = Infinity;
-            const v = new THREE.Vector3();
-            for (let vi = 0; vi < posAttr.count; vi++) {
-                v.fromBufferAttribute(posAttr, vi);
-                const u = v.dot(tangent);
-                if (u < u_at_entry) u_at_entry = u;
-            }
+        const uvAttr = geo.attributes.uv;
+        if (!uvAttr) {
+            _showMergeError('One or more walls are missing UV data — apply a display mode first');
+            return;
         }
 
-        // Assign UVs
-        const uvs = new Float32Array(posAttr.count * 2);
-        const vpos = new THREE.Vector3();
-        for (let vi = 0; vi < posAttr.count; vi++) {
-            vpos.fromBufferAttribute(posAttr, vi);
-            uvs[vi * 2]     = globalUOffset + (vpos.dot(tangent) - u_at_entry);
-            uvs[vi * 2 + 1] = vpos.dot(bitangent); // in-plane direction (N × T)
+        // Find u range of this wall's existing UVs
+        let uMin = Infinity, uMax = -Infinity;
+        for (let vi = 0; vi < uvAttr.count; vi++) {
+            const u = uvAttr.getX(vi);
+            if (u < uMin) uMin = u;
+            if (u > uMax) uMax = u;
         }
 
+        // Shift u so it starts at globalUOffset, keep v unchanged
+        const uShift = globalUOffset - uMin;
+        const uvs = new Float32Array(uvAttr.count * 2);
+        for (let vi = 0; vi < uvAttr.count; vi++) {
+            uvs[vi * 2]     = uvAttr.getX(vi) + uShift;
+            uvs[vi * 2 + 1] = uvAttr.getY(vi);
+        }
         geo.deleteAttribute('uv');
         geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 
-        // Compute this wall's width along tangent for global offset advance
-        let u_at_exit;
-        if (exitPt) {
-            u_at_exit = exitPt.dot(tangent) - u_at_entry;
-        } else {
-            let maxU = -Infinity;
-            const vv = new THREE.Vector3();
-            for (let vi = 0; vi < posAttr.count; vi++) {
-                vv.fromBufferAttribute(posAttr, vi);
-                const u = vv.dot(tangent) - u_at_entry;
-                if (u > maxU) maxU = u;
-            }
-            u_at_exit = maxU;
-        }
-        globalUOffset += u_at_exit;
-
+        globalUOffset += (uMax - uMin);
         geometries.push(geo);
     }
 
@@ -1658,5 +1568,5 @@ function _mergeSelectedWalls() {
 
     applyDisplayModes();
 
-    console.log(`Merged ${n} walls → wall_merged (UV u=0..${globalUOffset.toFixed(2)}m)`);
+    console.log(`Merged ${n} walls → wall_merged (u span: 0..${globalUOffset.toFixed(2)})`);
 }
