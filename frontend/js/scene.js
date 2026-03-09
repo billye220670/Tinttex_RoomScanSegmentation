@@ -413,51 +413,63 @@ function generatePlanarUVs(geometry) {
     const positions = geometry.attributes.position;
 
     // Compute average normal
-    let nx = 0, ny = 0, nz = 0;
+    const N = new THREE.Vector3();
+    const tmpN = new THREE.Vector3();
     for (let i = 0; i < normals.count; i++) {
-        nx += normals.getX(i);
-        ny += normals.getY(i);
-        nz += normals.getZ(i);
+        tmpN.fromBufferAttribute(normals, i);
+        N.add(tmpN);
     }
-    const nlen = Math.sqrt(nx * nx + ny * ny + nz * nz);
-    if (nlen > 0) { nx /= nlen; ny /= nlen; nz /= nlen; }
+    N.normalize();
 
-    // Compute tangent (horizontal direction in the plane)
-    let tx, ty = 0, tz;
-    if (Math.abs(ny) > 0.9) {
-        // Horizontal surface
-        tx = 1; tz = 0;
+    // T = cross(Y_world, N) — guaranteed horizontal for any wall orientation:
+    // The cross product of Y=(0,1,0) and N always has ty=0, so T lies flat in
+    // world space no matter how N is rotated. Only depends on N, so it remains
+    // stable after Phase-2 trimming which changes polygon shape but not N.
+    // Special case: floor/ceiling (N ≈ Y) — use world X instead.
+    const Y_WORLD = new THREE.Vector3(0, 1, 0);
+    let T;
+    if (Math.abs(N.dot(Y_WORLD)) > 0.9) {
+        // Horizontal surface (floor/ceiling)
+        T = new THREE.Vector3(1, 0, 0);
+        T.addScaledVector(N, -T.dot(N)).normalize();
     } else {
-        const hlen = Math.sqrt(nx * nx + nz * nz);
-        tx = hlen > 0 ? -nz / hlen : 1;
-        tz = hlen > 0 ? nx / hlen : 0;
+        // Wall: T = cross(Y, N) — always horizontal, ty = 0
+        T = new THREE.Vector3().crossVectors(Y_WORLD, N).normalize();
     }
 
-    // Bitangent = N x T
-    const bx = ny * tz - nz * ty;
-    const by = nz * tx - nx * tz;
-    const bz = nx * ty - ny * tx;
+    // B = N × T — lies in the plane, approximately world-up for walls
+    const B = new THREE.Vector3().crossVectors(N, T).normalize();
 
-    // Centroid
-    let cx = 0, cy = 0, cz = 0;
-    for (let i = 0; i < positions.count; i++) {
-        cx += positions.getX(i);
-        cy += positions.getY(i);
-        cz += positions.getZ(i);
+    // Project each vertex onto T (horizontal) and B (vertical-in-plane)
+    const count = positions.count;
+    const ru = new Float32Array(count);
+    const rv = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+        const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
+        ru[i] = x * T.x + y * T.y + z * T.z;
+        rv[i] = x * B.x + y * B.y + z * B.z;
     }
-    cx /= positions.count;
-    cy /= positions.count;
-    cz /= positions.count;
 
-    const scale = 0.5; // 2m per checker tile
-    const uvs = new Float32Array(positions.count * 2);
-    for (let i = 0; i < positions.count; i++) {
-        const dx = positions.getX(i) - cx;
-        const dy = positions.getY(i) - cy;
-        const dz = positions.getZ(i) - cz;
-        uvs[i * 2]     = (dx * tx + dy * ty + dz * tz) * scale;
-        uvs[i * 2 + 1] = (dx * bx + dy * by + dz * bz) * scale;
-    }
+    // Sort all vertex indices by V (B-axis = vertical), split into bottom / top halves,
+    // then sort each half by U (T-axis = horizontal).
+    // Assign corners: bottom-left→(0,0), bottom-right→(1,0), top-left→(0,1), top-right→(1,1).
+    // This guarantees the texture fills [0,1]×[0,1] regardless of how irregular the quad is,
+    // because the two triangles together cover the full UV square exactly.
+    const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => rv[a] - rv[b]);
+    const bN = Math.ceil(count / 2);
+    const tN = count - bN;
+    const bottom = order.slice(0, bN).sort((a, b) => ru[a] - ru[b]);
+    const top    = order.slice(bN).sort((a, b) => ru[a] - ru[b]);
+
+    const uvs = new Float32Array(count * 2);
+    bottom.forEach((vi, k) => {
+        uvs[vi * 2]     = bN > 1 ? k / (bN - 1) : 0.5;
+        uvs[vi * 2 + 1] = 0;
+    });
+    top.forEach((vi, k) => {
+        uvs[vi * 2]     = tN > 1 ? k / (tN - 1) : 0.5;
+        uvs[vi * 2 + 1] = 1;
+    });
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 }
 
@@ -499,7 +511,10 @@ function applyDisplayModes() {
         } else if (mode === 'checker') {
             child.receiveShadow = true;
             if (!checkerTextures[label]) checkerTextures[label] = createCheckerTexture(label);
-            if (!child.geometry.attributes.uv) {
+            // Always regenerate planar UVs for non-merged walls
+            // (backend GLB may include default TEXCOORD_0 that skips generatePlanarUVs)
+            const isMerged = child.name && child.name.includes('merged');
+            if (!isMerged) {
                 generatePlanarUVs(child.geometry);
             }
             child.material = new THREE.MeshBasicMaterial({
@@ -510,7 +525,8 @@ function applyDisplayModes() {
         } else if (mode === 'grid') {
             child.receiveShadow = true;
             if (!gridTextures[label]) gridTextures[label] = createGridTexture(label);
-            if (!child.geometry.attributes.uv) {
+            const isMerged = child.name && child.name.includes('merged');
+            if (!isMerged) {
                 generatePlanarUVs(child.geometry);
             }
             child.material = new THREE.MeshBasicMaterial({
@@ -1537,12 +1553,30 @@ function _mergeSelectedWalls() {
         // Transform vertices to lowPolyGroup local space
         const relMatrix = groupInvMatrix.clone().multiply(mesh.matrixWorld);
         geo.applyMatrix4(relMatrix);
+        geo.computeVertexNormals(); // ensure normals exist (backend GLB has none)
         geo.computeBoundingBox();
 
         const entryPt = i > 0 ? sharedEdges[i - 1] : null;
         const exitPt  = i < n - 1 ? sharedEdges[i] : null;
 
         const tangent = _computeTangentForWall(geo, entryPt, exitPt);
+
+        // Compute in-plane bitangent = N × T (same convention as generatePlanarUVs)
+        // This makes V follow the wall's own surface-local "down" direction,
+        // not world Y, so directional textures flow along the wall plane.
+        const normAttr = geo.attributes.normal;
+        const wallNormal = new THREE.Vector3();
+        if (normAttr) {
+            const vn = new THREE.Vector3();
+            for (let vi = 0; vi < normAttr.count; vi++) {
+                vn.fromBufferAttribute(normAttr, vi);
+                wallNormal.add(vn);
+            }
+            wallNormal.divideScalar(normAttr.count).normalize();
+        }
+        const bitangent = new THREE.Vector3().crossVectors(wallNormal, tangent);
+        if (bitangent.lengthSq() > 1e-12) bitangent.normalize();
+        else bitangent.set(0, -1, 0);
 
         // Compute u origin = projection of entry point onto tangent axis
         const posAttr = geo.attributes.position;
@@ -1566,7 +1600,7 @@ function _mergeSelectedWalls() {
         for (let vi = 0; vi < posAttr.count; vi++) {
             vpos.fromBufferAttribute(posAttr, vi);
             uvs[vi * 2]     = globalUOffset + (vpos.dot(tangent) - u_at_entry);
-            uvs[vi * 2 + 1] = vpos.y; // world Y = height in meters
+            uvs[vi * 2 + 1] = vpos.dot(bitangent); // in-plane direction (N × T)
         }
 
         geo.deleteAttribute('uv');
